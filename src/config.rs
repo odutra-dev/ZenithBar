@@ -339,6 +339,19 @@ impl AppConfig {
                 .map(|p| p.to_string_lossy().to_string())
                 .unwrap_or_else(|_| "zenithbar".to_string());
 
+            if let Some(data_home) = std::env::var_os("XDG_DATA_HOME")
+                .map(std::path::PathBuf::from)
+                .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")))
+            {
+                let icon_dir = data_home.join("icons/hicolor/512x512/apps");
+                let icon_dest = icon_dir.join("zenithbar.png");
+                if !icon_dest.exists() {
+                    let _ = fs::create_dir_all(&icon_dir);
+                    const ICON_BYTES: &[u8] = include_bytes!("../assets/icon.png");
+                    let _ = fs::write(&icon_dest, ICON_BYTES);
+                }
+            }
+
             let content = format!(
                 "[Desktop Entry]\n\
                  Type=Application\n\

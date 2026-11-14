@@ -27,6 +27,7 @@ chmod +x "$APP_DIR/usr/bin/ZenithBar"
 cp assets/zenithbar.desktop "$APP_DIR/zenithbar.desktop"
 cp assets/zenithbar.desktop "$APP_DIR/usr/share/applications/zenithbar.desktop"
 cp assets/icon.png "$APP_DIR/zenithbar.png"
+cp assets/icon.png "$APP_DIR/.DirIcon"
 cp assets/icon.png "$APP_DIR/usr/share/icons/hicolor/512x512/apps/zenithbar.png"
 
 # Create AppRun
