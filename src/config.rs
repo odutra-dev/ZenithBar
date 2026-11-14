@@ -233,7 +233,8 @@ impl AppConfig {
             return local;
         }
 
-        // Tenta APPDATA / LOCALAPPDATA
+        // Tenta APPDATA / LOCALAPPDATA no Windows
+        #[cfg(target_os = "windows")]
         if let Ok(appdata) = std::env::var("LOCALAPPDATA").or_else(|_| std::env::var("APPDATA")) {
             let mut p = PathBuf::from(appdata);
             p.push("ZenithBar");
@@ -242,6 +243,21 @@ impl AppConfig {
             return p;
         }
 
+        // Tenta XDG_CONFIG_HOME ou ~/.config no Linux
+        #[cfg(not(target_os = "windows"))]
+        {
+            let config_dir = if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+                PathBuf::from(xdg).join("zenithbar")
+            } else if let Ok(home) = std::env::var("HOME") {
+                PathBuf::from(home).join(".config").join("zenithbar")
+            } else {
+                return local;
+            };
+            let _ = fs::create_dir_all(&config_dir);
+            config_dir.join("Settings.json")
+        }
+
+        #[cfg(target_os = "windows")]
         local
     }
 
@@ -299,7 +315,45 @@ impl AppConfig {
         #[cfg(target_os = "windows")]
         self.apply_windows_startup();
 
+        #[cfg(not(target_os = "windows"))]
+        self.apply_linux_startup();
+
         Ok(())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    pub fn apply_linux_startup(&self) {
+        let autostart_dir = if let Ok(xdg) = std::env::var("XDG_CONFIG_HOME") {
+            PathBuf::from(xdg).join("autostart")
+        } else if let Ok(home) = std::env::var("HOME") {
+            PathBuf::from(home).join(".config").join("autostart")
+        } else {
+            return;
+        };
+
+        let desktop_file = autostart_dir.join("zenithbar.desktop");
+
+        if self.run_at_startup {
+            let _ = fs::create_dir_all(&autostart_dir);
+            let exe_path = std::env::current_exe()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| "zenithbar".to_string());
+
+            let content = format!(
+                "[Desktop Entry]\n\
+                 Type=Application\n\
+                 Name=ZenithBar\n\
+                 Comment=Modern, lightweight hardware telemetry sidebar\n\
+                 Exec={}\n\
+                 Icon=zenithbar\n\
+                 Terminal=false\n\
+                 Categories=System;Monitor;\n",
+                exe_path
+            );
+            let _ = fs::write(desktop_file, content);
+        } else if desktop_file.exists() {
+            let _ = fs::remove_file(desktop_file);
+        }
     }
 
     #[cfg(target_os = "windows")]

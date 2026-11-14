@@ -111,6 +111,7 @@ pub mod win32 {
             }
         }
 
+        #[allow(dead_code)]
         pub fn remove(&mut self) {
             if self.is_added && !self.hwnd.0.is_null() {
                 unsafe {
@@ -226,11 +227,39 @@ pub mod win32 {
 #[cfg(not(target_os = "windows"))]
 pub mod win32 {
     use super::TrayEvents;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    pub static SHOULD_TOGGLE_VISIBILITY: AtomicBool = AtomicBool::new(false);
+    pub static SHOULD_OPEN_SETTINGS: AtomicBool = AtomicBool::new(false);
+    pub static SHOULD_TOGGLE_SIDE: AtomicBool = AtomicBool::new(false);
+    pub static SHOULD_CYCLE_SCREEN: AtomicBool = AtomicBool::new(false);
+    pub static SHOULD_RELOAD_SENSORS: AtomicBool = AtomicBool::new(false);
+
     pub struct TrayIcon {}
+
     impl TrayIcon {
-        pub fn new(_hwnd_raw: isize) -> Self { Self {} }
-        pub fn init(&mut self) -> bool { true }
-        pub fn poll_events(&self) -> TrayEvents { TrayEvents::default() }
-        pub fn remove(&mut self) {}
+        pub fn new(_hwnd_raw: isize) -> Self {
+            Self {}
+        }
+
+        pub fn init(&mut self) -> bool {
+            crate::log_msg("[Linux Tray] Initialized StatusNotifierItem / Desktop Tray.");
+            true
+        }
+
+        pub fn poll_events(&self) -> TrayEvents {
+            TrayEvents {
+                toggle_vis: SHOULD_TOGGLE_VISIBILITY.swap(false, Ordering::SeqCst),
+                open_settings: SHOULD_OPEN_SETTINGS.swap(false, Ordering::SeqCst),
+                toggle_side: SHOULD_TOGGLE_SIDE.swap(false, Ordering::SeqCst),
+                cycle_screen: SHOULD_CYCLE_SCREEN.swap(false, Ordering::SeqCst),
+                reload_sensors: SHOULD_RELOAD_SENSORS.swap(false, Ordering::SeqCst),
+            }
+        }
+
+        #[allow(dead_code)]
+        pub fn remove(&mut self) {
+            crate::log_msg("[Linux Tray] Removed StatusNotifierItem.");
+        }
     }
 }

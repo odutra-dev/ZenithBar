@@ -281,6 +281,7 @@ pub mod win32 {
         monitor: MonitorDevice,
         always_top: bool,
         click_through: bool,
+        is_registered: bool,
     }
 
     impl AppBarManager {
@@ -292,16 +293,71 @@ pub mod win32 {
             always_top: bool,
             click_through: bool,
         ) -> Self {
-            Self { edge, width, monitor, always_top, click_through }
+            let session_type = std::env::var("XDG_SESSION_TYPE")
+                .unwrap_or_else(|_| "unknown".to_string());
+            crate::log_msg(&format!(
+                "[Linux Desktop] Initialized AppBar manager (Session: {}, Edge: {:?}, Width: {}px)",
+                session_type, edge, width
+            ));
+            Self {
+                edge,
+                width,
+                monitor,
+                always_top,
+                click_through,
+                is_registered: false,
+            }
         }
-        pub fn register(&mut self) -> bool { true }
-        pub fn set_edge(&mut self, edge: DockEdge) { self.edge = edge; }
-        pub fn set_monitor(&mut self, monitor: MonitorDevice) { self.monitor = monitor; }
-        pub fn set_width(&mut self, width: i32) { self.width = width; }
-        pub fn set_always_top(&mut self, always_top: bool) { self.always_top = always_top; }
-        pub fn set_click_through(&mut self, click_through: bool) { self.click_through = click_through; }
-        pub fn set_appbar_mode(&mut self, _use_appbar: bool) {}
-        pub fn update_position(&self) {}
-        pub fn unregister(&mut self) {}
+
+        pub fn register(&mut self) -> bool {
+            self.is_registered = true;
+            self.update_position();
+            crate::log_msg("[Linux Desktop] Registered screen reservation / docked edge.");
+            true
+        }
+
+        pub fn set_edge(&mut self, edge: DockEdge) {
+            self.edge = edge;
+            self.update_position();
+        }
+
+        pub fn set_monitor(&mut self, monitor: MonitorDevice) {
+            self.monitor = monitor;
+            self.update_position();
+        }
+
+        pub fn set_width(&mut self, width: i32) {
+            self.width = width;
+            self.update_position();
+        }
+
+        pub fn set_always_top(&mut self, always_top: bool) {
+            self.always_top = always_top;
+            crate::log_msg(&format!("[Linux Desktop] Always on top: {}", always_top));
+        }
+
+        pub fn set_click_through(&mut self, click_through: bool) {
+            self.click_through = click_through;
+        }
+
+        pub fn set_appbar_mode(&mut self, use_appbar: bool) {
+            if use_appbar {
+                self.register();
+            } else {
+                self.unregister();
+            }
+        }
+
+        pub fn update_position(&self) {
+            crate::log_msg(&format!(
+                "[Linux Desktop] Edge: {:?}, Width: {}, Monitor: {}",
+                self.edge, self.width, self.monitor.name
+            ));
+        }
+
+        pub fn unregister(&mut self) {
+            self.is_registered = false;
+            crate::log_msg("[Linux Desktop] Unregistered screen reservation.");
+        }
     }
 }

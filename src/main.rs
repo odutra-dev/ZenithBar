@@ -569,6 +569,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     log_msg("Aviso: FindWindowW não encontrou a janela ZenithBar.");
                 }
             }
+
+            #[cfg(not(target_os = "windows"))]
+            {
+                log_msg("5. [Linux] Inicializando Tray, AppBar e ancoragem de tela...");
+                let cfg = config_ref.borrow();
+                if cfg.show_tray_icon {
+                    let mut tray = TrayIcon::new(0);
+                    if tray.init() {
+                        log_msg("Ícone na bandeja do sistema inicializado com sucesso.");
+                        *tray_holder.borrow_mut() = Some(tray);
+                    }
+                }
+
+                let edge = if cfg.is_dock_right() {
+                    DockEdge::Right
+                } else {
+                    DockEdge::Left
+                };
+
+                let mut ab = AppBarManager::new(
+                    0,
+                    edge,
+                    cfg.sidebar_width as i32,
+                    target_monitor.clone(),
+                    cfg.always_top,
+                    cfg.click_through,
+                );
+
+                if cfg.use_app_bar && !cfg.initially_hidden {
+                    let _ = ab.register();
+                } else if !cfg.initially_hidden {
+                    ab.update_position();
+                }
+                *appbar_ref.borrow_mut() = Some(ab);
+
+                if cfg.initially_hidden {
+                    log_msg("Modo InitiallyHidden ativo no Linux.");
+                    if let Some(ui) = ui_weak_init.upgrade() {
+                        let _ = ui.hide();
+                    }
+                    *is_vis_init.borrow_mut() = false;
+                }
+            }
         },
     );
 

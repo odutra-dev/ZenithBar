@@ -46,5 +46,6 @@ pub mod win32 {
 
 #[cfg(not(target_os = "windows"))]
 pub mod win32 {
+    #[allow(dead_code)]
     pub fn apply_fluent_effects(_hwnd_raw: isize) {}
 }
