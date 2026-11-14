@@ -11,16 +11,19 @@ pub struct TrayEvents {
 pub mod win32 {
     use super::TrayEvents;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use windows::core::w;
-    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+    use windows::core::{w, PCWSTR};
+    use windows::Win32::Foundation::{HINSTANCE, HWND, LPARAM, LRESULT, POINT, WPARAM};
+    use windows::Win32::System::LibraryLoader::GetModuleHandleW;
     use windows::Win32::UI::Shell::{
         DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass, Shell_NotifyIconW,
         NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, LoadIconW,
-        SetForegroundWindow, TrackPopupMenuEx, IDI_APPLICATION,
-        MF_SEPARATOR, MF_STRING, TPM_BOTTOMALIGN, TPM_RIGHTBUTTON,
+        AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, GetSystemMetrics,
+        LoadIconW, LoadImageW, SetForegroundWindow, TrackPopupMenuEx,
+        HICON, IDI_APPLICATION, IMAGE_ICON, LR_DEFAULTCOLOR, LR_SHARED,
+        MF_SEPARATOR, MF_STRING, SM_CXSMICON, SM_CYSMICON,
+        TPM_BOTTOMALIGN, TPM_RIGHTBUTTON,
         WM_APP, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_RBUTTONUP,
     };
 
@@ -59,13 +62,37 @@ pub mod win32 {
             }
         }
 
+        unsafe fn load_app_icon() -> HICON {
+            unsafe {
+                if let Ok(hinst) = GetModuleHandleW(None) {
+                    if !hinst.0.is_null() {
+                        let cx = GetSystemMetrics(SM_CXSMICON);
+                        let cy = GetSystemMetrics(SM_CYSMICON);
+                        if let Ok(handle) = LoadImageW(
+                            Some(HINSTANCE(hinst.0)),
+                            PCWSTR(1 as *const u16),
+                            IMAGE_ICON,
+                            cx,
+                            cy,
+                            LR_DEFAULTCOLOR | LR_SHARED,
+                        ) {
+                            if !handle.0.is_null() {
+                                return HICON(handle.0);
+                            }
+                        }
+                    }
+                }
+                LoadIconW(None, IDI_APPLICATION).unwrap_or_default()
+            }
+        }
+
         pub fn init(&mut self) -> bool {
             if self.hwnd.0.is_null() {
                 return false;
             }
 
             unsafe {
-                let icon = LoadIconW(None, IDI_APPLICATION).unwrap_or_default();
+                let icon = Self::load_app_icon();
                 let mut tip = [0u16; 128];
                 let title = "ZenithBar - Hardware Diagnostics\0".encode_utf16().collect::<Vec<u16>>();
                 for (i, c) in title.iter().take(127).enumerate() {
