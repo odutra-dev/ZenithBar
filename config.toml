@@ -1,0 +1,19 @@
+# Configuração do ZenithBar ⚡
+
+# Intervalo de atualização da telemetria em milissegundos (padrão: 1000ms = 1s)
+refresh_interval_ms = 1000
+
+# Acoplamento: true = lado direito da tela, false = lado esquerdo da tela
+dock_right = true
+
+# Reservar área útil do desktop (AppBar) para não sobrepor janelas maximizadas
+use_appbar = true
+
+# Largura da barra lateral em pixels (padrão: 300)
+bar_width = 300
+
+# Exibir seção de Placa de Vídeo (GPU)
+show_gpu = true
+
+# Exibir gráficos de histórico em tempo real (Sparklines)
+show_sparklines = true
