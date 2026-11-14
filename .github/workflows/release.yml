@@ -1,0 +1,181 @@
+name: Automated Release
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  determine-version:
+    name: Determine Semantic Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.semver.outputs.version }}
+      tag: ${{ steps.semver.outputs.tag }}
+      should_release: ${{ steps.semver.outputs.should_release }}
+      changelog: ${{ steps.semver.outputs.changelog }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Calculate Version and Changelog
+        id: semver
+        run: |
+          python3 - << 'EOF'
+          import subprocess
+          import re
+          import os
+          import sys
+
+          # Fetch all remote tags
+          subprocess.run(['git', 'fetch', '--tags', '--force'], capture_output=True)
+
+          try:
+              latest_tag = subprocess.check_output(['git', 'describe', '--tags', '--abbrev=0']).decode().strip()
+          except Exception:
+              latest_tag = None
+
+          if not latest_tag:
+              version = "0.1.0"
+              range_spec = "HEAD"
+              should_release = True
+          else:
+              m = re.match(r'^v?(\d+)\.(\d+)\.(\d+)$', latest_tag)
+              if not m:
+                  major, minor, patch = 0, 1, 0
+              else:
+                  major, minor, patch = int(m.group(1)), int(m.group(2)), int(m.group(3))
+
+              range_spec = f"{latest_tag}..HEAD"
+              commits_raw = subprocess.check_output(['git', 'log', range_spec, '--format=%s%n%b']).decode()
+              if not commits_raw.strip():
+                  print("No new commits since last release tag.")
+                  should_release = False
+                  version = f"{major}.{minor}.{patch}"
+              else:
+                  should_release = True
+                  if "BREAKING CHANGE" in commits_raw or re.search(r'^[a-z]+!:', commits_raw, re.MULTILINE):
+                      major += 1
+                      minor = 0
+                      patch = 0
+                  elif re.search(r'^feat(\([^)]+\))?:', commits_raw, re.MULTILINE):
+                      minor += 1
+                      patch = 0
+                  else:
+                      patch += 1
+                  version = f"{major}.{minor}.{patch}"
+
+          tag = f"v{version}"
+
+          changelog_lines = []
+          try:
+              log_output = subprocess.check_output(['git', 'log', range_spec, '--format=%s']).decode().strip()
+              commits = [c.strip() for c in log_output.split('\n') if c.strip()]
+          except Exception:
+              commits = []
+
+          features = [c for c in commits if c.startswith('feat')]
+          fixes = [c for c in commits if c.startswith('fix')]
+          perf = [c for c in commits if c.startswith('perf')]
+          others = [c for c in commits if not (c.startswith('feat') or c.startswith('fix') or c.startswith('perf'))]
+
+          changelog_lines.append(f"## ZenithBar {tag}\n")
+          if features:
+              changelog_lines.append("### Features")
+              for f in features:
+                  changelog_lines.append(f"- {f}")
+              changelog_lines.append("")
+          if fixes:
+              changelog_lines.append("### Bug Fixes")
+              for fx in fixes:
+                  changelog_lines.append(f"- {fx}")
+              changelog_lines.append("")
+          if perf:
+              changelog_lines.append("### Performance Improvements")
+              for p in perf:
+                  changelog_lines.append(f"- {p}")
+              changelog_lines.append("")
+          if others:
+              changelog_lines.append("### Maintenance and Documentation")
+              for o in others:
+                  changelog_lines.append(f"- {o}")
+              changelog_lines.append("")
+
+          changelog_text = "\n".join(changelog_lines).strip()
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as gh_out:
+              gh_out.write(f"version={version}\n")
+              gh_out.write(f"tag={tag}\n")
+              gh_out.write(f"should_release={'true' if should_release else 'false'}\n")
+              delimiter = "EOF_CHANGELOG_DELIMITER"
+              gh_out.write(f"changelog<<{delimiter}\n{changelog_text}\n{delimiter}\n")
+
+          print(f"Calculated version: {version} (tag: {tag}, should_release: {should_release})")
+          EOF
+
+  build-and-release:
+    name: Build and Release
+    needs: determine-version
+    if: needs.determine-version.outputs.should_release == 'true'
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Cargo Dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Synchronize Version in Cargo.toml
+        shell: bash
+        run: |
+          sed -i "s/^version = .*/version = \"${{ needs.determine-version.outputs.version }}\"/" Cargo.toml
+
+      - name: Build Release Binary
+        run: |
+          cargo build --release
+
+      - name: Package Release Distribution
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path staging
+          Copy-Item target/release/ZenithBar.exe staging/ZenithBar.exe
+          Copy-Item Settings.json staging/Settings.json
+          Copy-Item README.md staging/README.md
+
+          Compress-Archive -Path staging/* -DestinationPath ZenithBar-windows-x64.zip
+          Copy-Item target/release/ZenithBar.exe ZenithBar.exe
+
+          Get-FileHash -Algorithm SHA256 ZenithBar.exe, ZenithBar-windows-x64.zip | ForEach-Object {
+              "$($_.Hash.ToLower())  $($_.Path | Split-Path -Leaf)"
+          } | Out-File -Encoding ascii SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.determine-version.outputs.tag }}
+          name: ZenithBar ${{ needs.determine-version.outputs.tag }}
+          body: ${{ needs.determine-version.outputs.changelog }}
+          target_commitish: ${{ github.sha }}
+          files: |
+            ZenithBar-windows-x64.zip
+            ZenithBar.exe
+            SHA256SUMS.txt
+          draft: false
+          prerelease: false
