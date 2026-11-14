@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ZenithBar
+Comment=Modern, lightweight hardware telemetry sidebar
+Exec=ZenithBar
+Icon=zenithbar
+Terminal=false
+Categories=System;Monitor;Utility;
+StartupWMClass=ZenithBar
