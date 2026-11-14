@@ -1,4 +1,4 @@
-name: Automated Release
+name: Automated Multiplatform Release
 
 on:
   push:
@@ -123,16 +123,14 @@ jobs:
           print(f"Calculated version: {version} (tag: {tag}, should_release: {should_release})")
           EOF
 
-  build-and-release:
-    name: Build and Release
+  build-windows:
+    name: Build Windows Binary
     needs: determine-version
     if: needs.determine-version.outputs.should_release == 'true'
     runs-on: windows-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -147,11 +145,11 @@ jobs:
         run: |
           sed -i "s/^version = .*/version = \"${{ needs.determine-version.outputs.version }}\"/" Cargo.toml
 
-      - name: Build Release Binary
+      - name: Build Windows Binary
         run: |
           cargo build --release
 
-      - name: Package Release Distribution
+      - name: Package Windows Distribution
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path staging
@@ -162,9 +160,72 @@ jobs:
           Compress-Archive -Path staging/* -DestinationPath ZenithBar-windows-x64.zip
           Copy-Item target/release/ZenithBar.exe ZenithBar.exe
 
-          Get-FileHash -Algorithm SHA256 ZenithBar.exe, ZenithBar-windows-x64.zip | ForEach-Object {
-              "$($_.Hash.ToLower())  $($_.Path | Split-Path -Leaf)"
-          } | Out-File -Encoding ascii SHA256SUMS.txt
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binaries
+          path: |
+            ZenithBar-windows-x64.zip
+            ZenithBar.exe
+
+  build-linux:
+    name: Build Linux AppImage
+    needs: determine-version
+    if: needs.determine-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libx11-dev libasound2-dev
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo Dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Synchronize Version in Cargo.toml
+        run: |
+          sed -i "s/^version = .*/version = \"${{ needs.determine-version.outputs.version }}\"/" Cargo.toml
+
+      - name: Build Linux Binary
+        run: |
+          cargo build --release
+
+      - name: Build AppImage
+        run: |
+          chmod +x scripts/build-appimage.sh
+          ./scripts/build-appimage.sh target/release/ZenithBar ZenithBar-x86_64.AppImage
+
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binaries
+          path: ZenithBar-x86_64.AppImage
+
+  publish-release:
+    name: Publish Multiplatform Release
+    needs: [determine-version, build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-binaries
+
+      - name: Download Linux Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-binaries
+
+      - name: Generate SHA256 Checksums
+        run: |
+          sha256sum ZenithBar.exe ZenithBar-windows-x64.zip ZenithBar-x86_64.AppImage > SHA256SUMS.txt
+          cat SHA256SUMS.txt
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -176,6 +237,7 @@ jobs:
           files: |
             ZenithBar-windows-x64.zip
             ZenithBar.exe
+            ZenithBar-x86_64.AppImage
             SHA256SUMS.txt
           draft: false
           prerelease: false
