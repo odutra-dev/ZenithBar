@@ -58,7 +58,7 @@ component ProgressBar inherits Rectangle {
 
 component MetricSection inherits Rectangle {
     in property <string> title: "SECTION";
-    in property <string> icon: "⚡";
+    in property <image> icon_source;
     in property <color> accent_color: #38bdf8;
     in property <bool> alert_active: false;
     in property <string> badge: "";
@@ -79,12 +79,13 @@ component MetricSection inherits Rectangle {
             alignment: space-between;
 
             HorizontalLayout {
-                spacing: 5px;
+                spacing: 6px;
                 horizontal-stretch: 1;
-                Text {
-                    text: root.icon;
-                    font-size: 13px;
-                    color: root.alert_active ? #ef4444 : root.accent_color;
+                Image {
+                    source: root.icon_source;
+                    width: 14px;
+                    height: 14px;
+                    colorize: root.alert_active ? #ef4444 : root.accent_color;
                     vertical-alignment: center;
                 }
                 Text {
@@ -210,70 +211,57 @@ export component AppWindow inherits Window {
             border-radius: 8px;
             border-width: 1px;
             border-color: #ffffff10;
-            height: 64px;
+            height: 60px;
 
             HorizontalLayout {
                 padding: 8px;
                 alignment: space-between;
 
-                HorizontalLayout {
+                VerticalLayout {
                     alignment: center;
-                    spacing: 8px;
+                    spacing: 2px;
                     horizontal-stretch: 1;
 
-                    Image {
-                        source: @image-url("../assets/icon.png");
-                        width: 28px;
-                        height: 28px;
-                        vertical-alignment: center;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: root.time_str;
+                            font-size: 18px;
+                            font-weight: 800;
+                            color: #ffffff;
+                        }
+                        Text {
+                            text: root.hostname;
+                            font-size: 10px;
+                            font-weight: 600;
+                            color: #38bdf8;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            horizontal-stretch: 1;
+                            visible: root.show_machine_name;
+                        }
                     }
 
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 2px;
-                        horizontal-stretch: 1;
-
-                        HorizontalLayout {
-                            spacing: 5px;
-                            Text {
-                                text: root.time_str;
-                                font-size: 17px;
-                                font-weight: 800;
-                                color: #ffffff;
-                            }
-                            Text {
-                                text: root.hostname;
-                                font-size: 10px;
-                                font-weight: 600;
-                                color: #38bdf8;
-                                vertical-alignment: center;
-                                overflow: elide;
-                                horizontal-stretch: 1;
-                                visible: root.show_machine_name;
-                            }
+                    if root.show_clock : HorizontalLayout {
+                        spacing: 6px;
+                        Text {
+                            text: root.date_str;
+                            font-size: 9px;
+                            color: #94a3b8;
+                            overflow: elide;
                         }
-
-                        if root.show_clock : HorizontalLayout {
-                            spacing: 6px;
-                            Text {
-                                text: root.date_str;
-                                font-size: 9px;
-                                color: #94a3b8;
-                                overflow: elide;
-                            }
-                            Text {
-                                text: "• " + root.uptime_str;
-                                font-size: 9px;
-                                color: #64748b;
-                                overflow: elide;
-                            }
+                        Text {
+                            text: "• " + root.uptime_str;
+                            font-size: 9px;
+                            color: #64748b;
+                            overflow: elide;
                         }
                     }
                 }
 
                 if !root.collapse_menu_bar : HorizontalLayout {
                     alignment: center;
-                    spacing: 3px;
+                    spacing: 4px;
 
                     // Settings gear button
                     Rectangle {
@@ -281,10 +269,11 @@ export component AppWindow inherits Window {
                         height: 22px;
                         background: #ffffff10;
                         border-radius: 4px;
-                        Text {
-                            text: "⚙";
-                            font-size: 11px;
-                            color: #cbd5e1;
+                        Image {
+                            source: @image-url("../assets/icons/settings.svg");
+                            width: 12px;
+                            height: 12px;
+                            colorize: #cbd5e1;
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
@@ -299,10 +288,11 @@ export component AppWindow inherits Window {
                         height: 22px;
                         background: #ffffff10;
                         border-radius: 4px;
-                        Text {
-                            text: root.is_docked_right ? "⇥" : "⇤";
-                            font-size: 12px;
-                            color: #cbd5e1;
+                        Image {
+                            source: @image-url("../assets/icons/dock.svg");
+                            width: 12px;
+                            height: 12px;
+                            colorize: #cbd5e1;
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
@@ -324,7 +314,7 @@ export component AppWindow inherits Window {
                 // CPU Section with Per-Core Grid & Threshold Alert
                 if root.enable_cpu : MetricSection {
                     title: "PROCESSADOR (CPU)";
-                    icon: "🔲";
+                    icon_source: @image-url("../assets/icons/cpu.svg");
                     accent_color: #38bdf8;
                     alert_active: root.cpu_usage > 0.85 || root.cpu_temp_val > 80.0;
                     badge: root.cpu_usage_str;
@@ -342,17 +332,17 @@ export component AppWindow inherits Window {
                     }
 
                     HorizontalLayout {
-                        alignment: space-between;
+                        spacing: 4px;
                         Text {
                             text: "Clock: " + root.cpu_clock_str;
-                            font-size: 10px;
+                            font-size: 9.5px;
                             color: #cbd5e1;
                             overflow: elide;
                             horizontal-stretch: 1;
                         }
                         Text {
                             text: "Temp: " + root.cpu_temp_str;
-                            font-size: 10px;
+                            font-size: 9.5px;
                             font-weight: 700;
                             color: root.cpu_temp_val > 80.0 ? #ef4444 : #f1f5f9;
                             overflow: elide;
@@ -396,7 +386,7 @@ export component AppWindow inherits Window {
                 // RAM Section with Threshold Alert
                 if root.enable_ram : MetricSection {
                     title: "MEMÓRIA (RAM)";
-                    icon: "💾";
+                    icon_source: @image-url("../assets/icons/ram.svg");
                     accent_color: #a855f7;
                     alert_active: root.ram_percent > 0.90;
                     badge: root.ram_percent_str;
@@ -407,17 +397,17 @@ export component AppWindow inherits Window {
                     }
 
                     HorizontalLayout {
-                        alignment: space-between;
+                        spacing: 4px;
                         Text {
                             text: root.ram_usage_str;
-                            font-size: 10px;
+                            font-size: 9.5px;
                             color: #cbd5e1;
                             overflow: elide;
                             horizontal-stretch: 1;
                         }
                         Text {
                             text: root.ram_available_str;
-                            font-size: 10px;
+                            font-size: 9.5px;
                             color: #94a3b8;
                             overflow: elide;
                         }
@@ -432,7 +422,7 @@ export component AppWindow inherits Window {
                 // GPU Section with Threshold Alert
                 if (root.gpu_detected && root.enable_gpu) : MetricSection {
                     title: "PLACA DE VÍDEO (GPU)";
-                    icon: "🎮";
+                    icon_source: @image-url("../assets/icons/gpu.svg");
                     accent_color: #10b981;
                     alert_active: root.gpu_usage > 0.85 || root.gpu_temp_val > 80.0;
                     badge: root.gpu_usage_str;
@@ -450,17 +440,17 @@ export component AppWindow inherits Window {
                     }
 
                     HorizontalLayout {
-                        alignment: space-between;
+                        spacing: 4px;
                         Text {
                             text: "VRAM: " + root.gpu_vram_str;
-                            font-size: 10px;
+                            font-size: 9.5px;
                             color: #cbd5e1;
                             overflow: elide;
                             horizontal-stretch: 1;
                         }
                         Text {
                             text: "Temp: " + root.gpu_temp_str;
-                            font-size: 10px;
+                            font-size: 9.5px;
                             font-weight: 700;
                             color: root.gpu_temp_val > 80.0 ? #ef4444 : #f1f5f9;
                             overflow: elide;
@@ -469,7 +459,7 @@ export component AppWindow inherits Window {
 
                     if root.gpu_fan_str != "" : Text {
                         text: "Fan: " + root.gpu_fan_str;
-                        font-size: 10px;
+                        font-size: 9.5px;
                         color: #94a3b8;
                         overflow: elide;
                     }
@@ -483,7 +473,7 @@ export component AppWindow inherits Window {
                 // Storage Section (Supports Multi-Disk List or Primary View)
                 if root.enable_disks : MetricSection {
                     title: "ARMAZENAMENTO";
-                    icon: "💽";
+                    icon_source: @image-url("../assets/icons/disk.svg");
                     accent_color: #f59e0b;
                     badge: root.disk_primary_name;
 
@@ -526,10 +516,10 @@ export component AppWindow inherits Window {
                         for disk in root.disks_list : VerticalLayout {
                             spacing: 3px;
                             HorizontalLayout {
-                                alignment: space-between;
+                                spacing: 4px;
                                 Text {
-                                    text: disk.mount + " " + disk.name;
-                                    font-size: 10px;
+                                    text: disk.name != "" ? disk.mount + " " + disk.name : disk.mount;
+                                    font-size: 9.5px;
                                     font-weight: 600;
                                     color: #f1f5f9;
                                     overflow: elide;
@@ -568,7 +558,7 @@ export component AppWindow inherits Window {
                 // Network Section (Shows Local IP and External WAN IP)
                 if root.enable_network : MetricSection {
                     title: "REDE";
-                    icon: "🌐";
+                    icon_source: @image-url("../assets/icons/network.svg");
                     accent_color: #f43f5e;
                     badge: root.net_download_str;
 
@@ -598,7 +588,7 @@ export component AppWindow inherits Window {
                     }
 
                     HorizontalLayout {
-                        alignment: space-between;
+                        spacing: 4px;
                         Text {
                             text: "Local: " + root.net_ip_str;
                             font-size: 9px;
@@ -613,6 +603,12 @@ export component AppWindow inherits Window {
                             overflow: elide;
                         }
                     }
+
+                    if root.show_sparklines : Sparkline {
+                        values: root.net_history;
+                        line_color: #f43f5e;
+                    }
+                }
 
                     if root.show_sparklines : Sparkline {
                         values: root.net_history;
@@ -671,10 +667,11 @@ export component AppWindow inherits Window {
                         height: 20px;
                         background: #ffffff0a;
                         border-radius: 4px;
-                        Text {
-                            text: "✕";
-                            font-size: 11px;
-                            color: #94a3b8;
+                        Image {
+                            source: @image-url("../assets/icons/close.svg");
+                            width: 10px;
+                            height: 10px;
+                            colorize: #94a3b8;
                             horizontal-alignment: center;
                             vertical-alignment: center;
                         }
@@ -686,4 +683,3 @@ export component AppWindow inherits Window {
             }
         }
     }
-}

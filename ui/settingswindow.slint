@@ -37,7 +37,7 @@ component SettingItem inherits Rectangle {
 
 component TabButton inherits Rectangle {
     in property <string> title: "Tab";
-    in property <string> icon: "⚙";
+    in property <image> icon_source;
     in property <bool> active: false;
     callback clicked();
 
@@ -53,9 +53,11 @@ component TabButton inherits Rectangle {
         padding-left: 10px;
         padding-right: 10px;
 
-        Text {
-            text: root.icon;
-            font-size: 14px;
+        Image {
+            source: root.icon_source;
+            width: 14px;
+            height: 14px;
+            colorize: root.active ? #38bdf8 : #cbd5e1;
             vertical-alignment: center;
         }
 
@@ -175,31 +177,31 @@ export component SettingsWindow inherits Window {
 
             TabButton {
                 title: "Geral";
-                icon: "⚙";
+                icon_source: @image-url("../assets/icons/settings.svg");
                 active: root.current_tab == 0;
                 clicked => { root.current_tab = 0; }
             }
             TabButton {
                 title: "Avançado";
-                icon: "⚡";
+                icon_source: @image-url("../assets/icons/cpu.svg");
                 active: root.current_tab == 1;
                 clicked => { root.current_tab = 1; }
             }
             TabButton {
                 title: "Estilo";
-                icon: "🎨";
+                icon_source: @image-url("../assets/icons/dock.svg");
                 active: root.current_tab == 2;
                 clicked => { root.current_tab = 2; }
             }
             TabButton {
                 title: "Monitores";
-                icon: "📊";
+                icon_source: @image-url("../assets/icons/gpu.svg");
                 active: root.current_tab == 3;
                 clicked => { root.current_tab = 3; }
             }
             TabButton {
                 title: "Atalhos";
-                icon: "⌨";
+                icon_source: @image-url("../assets/icons/network.svg");
                 active: root.current_tab == 4;
                 clicked => { root.current_tab = 4; }
             }
