@@ -113,9 +113,9 @@ component MetricSection inherits Rectangle {
 export component AppWindow inherits Window {
     title: "ZenithBar";
     icon: @image-url("../assets/icon.png");
-    width: 300px;
+    width: root.sidebar_width_px * 1px;
     no-frame: true;
-    background: #0f1015f6;
+    background: Colors.rgb(15, 16, 21).with-alpha(root.bg_opacity_val);
     default-font-family: "Segoe UI Variable Display, Segoe UI, sans-serif";
 
     // Callbacks to Rust
@@ -125,6 +125,10 @@ export component AppWindow inherits Window {
     callback request_open_settings();
     callback request_next_disk();
     callback request_quit();
+
+    // Dynamic sizing & opacity
+    in-out property <float> sidebar_width_px: 300;
+    in-out property <float> bg_opacity_val: 0.96;
 
     // System Header
     in-out property <string> hostname: "Meu PC";

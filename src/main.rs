@@ -148,6 +148,8 @@ fn apply_settings_to_app(
     ui.set_show_machine_name(cfg.show_machine_name);
     ui.set_show_clock(cfg.show_clock);
     ui.set_collapse_menu_bar(cfg.collapse_menu_bar);
+    ui.set_sidebar_width_px(cfg.sidebar_width as f32);
+    ui.set_bg_opacity_val(cfg.bg_opacity);
 
     // Atualiza o AppBar nativo Win32
     if let Some(ab_mgr) = ab.as_mut() {
@@ -253,6 +255,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ui.set_show_machine_name(cfg.show_machine_name);
         ui.set_show_clock(cfg.show_clock);
         ui.set_collapse_menu_bar(cfg.collapse_menu_bar);
+        ui.set_sidebar_width_px(cfg.sidebar_width as f32);
+        ui.set_bg_opacity_val(cfg.bg_opacity);
     }
 
     log_msg("4. Inicializando thread de telemetria isolada em background (MTA)...");
