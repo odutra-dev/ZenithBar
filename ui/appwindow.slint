@@ -70,16 +70,17 @@ component MetricSection inherits Rectangle {
     border-color: root.alert_active ? #ef444480 : #ffffff12;
 
     VerticalLayout {
-        padding: 10px;
-        spacing: 8px;
+        padding: 8px;
+        spacing: 6px;
 
         // Header
         HorizontalLayout {
-            spacing: 8px;
+            spacing: 6px;
             alignment: space-between;
 
             HorizontalLayout {
-                spacing: 6px;
+                spacing: 5px;
+                horizontal-stretch: 1;
                 Text {
                     text: root.icon;
                     font-size: 13px;
@@ -88,20 +89,23 @@ component MetricSection inherits Rectangle {
                 }
                 Text {
                     text: root.title;
-                    font-size: 12px;
+                    font-size: 11px;
                     font-weight: 700;
                     color: root.alert_active ? #fca5a5 : #f1f5f9;
                     letter-spacing: 0.5px;
                     vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
                 }
             }
 
             if root.badge != "": Text {
                 text: root.badge;
-                font-size: 11px;
+                font-size: 10px;
                 color: root.alert_active ? #ef4444 : root.accent_color;
                 font-weight: 700;
                 vertical-alignment: center;
+                overflow: elide;
             }
         }
 
@@ -197,8 +201,8 @@ export component AppWindow inherits Window {
     in-out property <[float]> net_history: [0.1, 0.15, 0.3, 0.8, 0.5, 0.2, 0.1, 0.4, 0.6, 0.25];
 
     VerticalLayout {
-        padding: 8px;
-        spacing: 8px;
+        padding: 6px;
+        spacing: 6px;
 
         // Top System Bar
         Rectangle {
@@ -206,57 +210,62 @@ export component AppWindow inherits Window {
             border-radius: 8px;
             border-width: 1px;
             border-color: #ffffff10;
-            height: 72px;
+            height: 64px;
 
             HorizontalLayout {
-                padding: 10px;
+                padding: 8px;
                 alignment: space-between;
 
                 HorizontalLayout {
                     alignment: center;
-                    spacing: 10px;
+                    spacing: 8px;
+                    horizontal-stretch: 1;
 
                     Image {
                         source: @image-url("../assets/icon.png");
-                        width: 32px;
-                        height: 32px;
+                        width: 28px;
+                        height: 28px;
                         vertical-alignment: center;
                     }
 
                     VerticalLayout {
                         alignment: center;
                         spacing: 2px;
+                        horizontal-stretch: 1;
 
                         HorizontalLayout {
-                            spacing: 6px;
+                            spacing: 5px;
                             Text {
                                 text: root.time_str;
-                                font-size: 19px;
+                                font-size: 17px;
                                 font-weight: 800;
                                 color: #ffffff;
                             }
                             Text {
                                 text: root.hostname;
-                                font-size: 11px;
+                                font-size: 10px;
                                 font-weight: 600;
                                 color: #38bdf8;
                                 vertical-alignment: center;
                                 overflow: elide;
+                                horizontal-stretch: 1;
                                 visible: root.show_machine_name;
                             }
                         }
 
                         if root.show_clock : HorizontalLayout {
-                            spacing: 8px;
+                            spacing: 6px;
                             Text {
                                 text: root.date_str;
-                                font-size: 10px;
+                                font-size: 9px;
                                 color: #94a3b8;
+                                overflow: elide;
                             }
                             Text {
                                 text: "• " + root.uptime_str;
-                                font-size: 10px;
+                                font-size: 9px;
                                 color: #64748b;
+                                overflow: elide;
                             }
                         }
                     }
@@ -264,17 +273,17 @@ export component AppWindow inherits Window {
 
                 if !root.collapse_menu_bar : HorizontalLayout {
                     alignment: center;
-                    spacing: 4px;
+                    spacing: 3px;
 
                     // Settings gear button
                     Rectangle {
-                        width: 24px;
+                        width: 22px;
                         height: 22px;
                         background: #ffffff10;
                         border-radius: 4px;
                         Text {
                             text: "⚙";
-                            font-size: 12px;
+                            font-size: 11px;
                             color: #cbd5e1;
                             horizontal-alignment: center;
                             vertical-alignment: center;
@@ -286,13 +295,13 @@ export component AppWindow inherits Window {
 
                     // Dock side switch button
                     Rectangle {
-                        width: 24px;
+                        width: 22px;
                         height: 22px;
                         background: #ffffff10;
                         border-radius: 4px;
                         Text {
                             text: root.is_docked_right ? "⇥" : "⇤";
-                            font-size: 13px;
+                            font-size: 12px;
                             color: #cbd5e1;
                             horizontal-alignment: center;
                             vertical-alignment: center;
@@ -310,7 +319,7 @@ export component AppWindow inherits Window {
             vertical-stretch: 1;
 
             VerticalLayout {
-                spacing: 8px;
+                spacing: 6px;
 
                 // CPU Section with Per-Core Grid & Threshold Alert
                 if root.enable_cpu : MetricSection {
@@ -338,12 +347,15 @@ export component AppWindow inherits Window {
                             text: "Clock: " + root.cpu_clock_str;
                             font-size: 10px;
                             color: #cbd5e1;
+                            overflow: elide;
+                            horizontal-stretch: 1;
                         }
                         Text {
                             text: "Temp: " + root.cpu_temp_str;
                             font-size: 10px;
                             font-weight: 700;
                             color: root.cpu_temp_val > 80.0 ? #ef4444 : #f1f5f9;
+                            overflow: elide;
                         }
                     }
 
@@ -356,17 +368,17 @@ export component AppWindow inherits Window {
                             color: #64748b;
                         }
                         HorizontalLayout {
-                            spacing: 3px;
+                            spacing: 2px;
                             for core_load in root.cpu_core_loads : Rectangle {
                                 horizontal-stretch: 1;
-                                height: 22px;
+                                height: 20px;
                                 background: #ffffff0a;
                                 border-radius: 2px;
                                 clip: true;
                                 VerticalLayout {
                                     alignment: end;
                                     Rectangle {
-                                        height: max(2px, core_load * 22px);
+                                        height: max(2px, core_load * 20px);
                                         background: core_load > 0.85 ? #ef4444 : (core_load > 0.5 ? #f59e0b : #38bdf8);
                                         border-radius: 1px;
                                     }
@@ -400,11 +412,14 @@ export component AppWindow inherits Window {
                             text: root.ram_usage_str;
                             font-size: 10px;
                             color: #cbd5e1;
+                            overflow: elide;
+                            horizontal-stretch: 1;
                         }
                         Text {
                             text: root.ram_available_str;
                             font-size: 10px;
                             color: #94a3b8;
+                            overflow: elide;
                         }
                     }
 
@@ -440,12 +455,15 @@ export component AppWindow inherits Window {
                             text: "VRAM: " + root.gpu_vram_str;
                             font-size: 10px;
                             color: #cbd5e1;
+                            overflow: elide;
+                            horizontal-stretch: 1;
                         }
                         Text {
                             text: "Temp: " + root.gpu_temp_str;
                             font-size: 10px;
                             font-weight: 700;
                             color: root.gpu_temp_val > 80.0 ? #ef4444 : #f1f5f9;
+                            overflow: elide;
                         }
                     }
 
@@ -453,6 +471,7 @@ export component AppWindow inherits Window {
                         text: "Fan: " + root.gpu_fan_str;
                         font-size: 10px;
                         color: #94a3b8;
+                        overflow: elide;
                     }
 
                     if root.show_sparklines : Sparkline {
@@ -469,7 +488,7 @@ export component AppWindow inherits Window {
                     badge: root.disk_primary_name;
 
                     if !root.show_all_disks : VerticalLayout {
-                        spacing: 6px;
+                        spacing: 5px;
                         ProgressBar {
                             progress: root.disk_primary_percent;
                             bar_color: root.disk_primary_percent > 0.90 ? #ef4444 : #f59e0b;
@@ -481,26 +500,29 @@ export component AppWindow inherits Window {
                                 text: root.disk_primary_usage;
                                 font-size: 10px;
                                 color: #cbd5e1;
+                                overflow: elide;
                             }
                         }
 
                         HorizontalLayout {
-                            spacing: 12px;
+                            spacing: 8px;
                             Text {
                                 text: "↓ R: " + root.disk_read_str;
                                 font-size: 10px;
                                 color: #34d399;
+                                overflow: elide;
                             }
                             Text {
                                 text: "↑ W: " + root.disk_write_str;
                                 font-size: 10px;
                                 color: #f87171;
+                                overflow: elide;
                             }
                         }
                     }
 
                     if root.show_all_disks : VerticalLayout {
-                        spacing: 8px;
+                        spacing: 6px;
                         for disk in root.disks_list : VerticalLayout {
                             spacing: 3px;
                             HorizontalLayout {
@@ -510,11 +532,14 @@ export component AppWindow inherits Window {
                                     font-size: 10px;
                                     font-weight: 600;
                                     color: #f1f5f9;
+                                    overflow: elide;
+                                    horizontal-stretch: 1;
                                 }
                                 Text {
                                     text: disk.used_gb + " / " + disk.total_gb;
                                     font-size: 9px;
                                     color: #94a3b8;
+                                    overflow: elide;
                                 }
                             }
                             ProgressBar {
@@ -522,16 +547,18 @@ export component AppWindow inherits Window {
                                 bar_color: disk.percent > 0.90 ? #ef4444 : #f59e0b;
                             }
                             HorizontalLayout {
-                                spacing: 10px;
+                                spacing: 8px;
                                 Text {
                                     text: "↓ " + disk.read_speed;
                                     font-size: 9px;
                                     color: #34d399;
+                                    overflow: elide;
                                 }
                                 Text {
                                     text: "↑ " + disk.write_speed;
                                     font-size: 9px;
                                     color: #f87171;
+                                    overflow: elide;
                                 }
                             }
                         }
@@ -553,18 +580,20 @@ export component AppWindow inherits Window {
                     }
 
                     HorizontalLayout {
-                        spacing: 12px;
+                        spacing: 8px;
                         Text {
                             text: "↓ " + root.net_download_str;
                             font-size: 11px;
                             font-weight: 600;
                             color: #38bdf8;
+                            overflow: elide;
                         }
                         Text {
                             text: "↑ " + root.net_upload_str;
                             font-size: 11px;
                             font-weight: 600;
                             color: #fb7185;
+                            overflow: elide;
                         }
                     }
 
@@ -574,11 +603,14 @@ export component AppWindow inherits Window {
                             text: "Local: " + root.net_ip_str;
                             font-size: 9px;
                             color: #64748b;
+                            overflow: elide;
+                            horizontal-stretch: 1;
                         }
                         Text {
                             text: "WAN: " + root.net_ext_ip_str;
                             font-size: 9px;
                             color: #38bdf8;
+                            overflow: elide;
                         }
                     }
 
@@ -596,33 +628,36 @@ export component AppWindow inherits Window {
             border-radius: 8px;
             border-width: 1px;
             border-color: #ffffff10;
-            height: 36px;
+            height: 32px;
 
             HorizontalLayout {
-                padding-left: 10px;
-                padding-right: 10px;
+                padding-left: 8px;
+                padding-right: 8px;
                 alignment: space-between;
 
                 HorizontalLayout {
                     alignment: center;
-                    spacing: 6px;
+                    spacing: 5px;
+                    horizontal-stretch: 1;
                     Image {
                         source: @image-url("../assets/icon.png");
-                        width: 14px;
-                        height: 14px;
+                        width: 13px;
+                        height: 13px;
                         vertical-alignment: center;
                     }
                     Rectangle {
-                        width: 6px;
-                        height: 6px;
-                        border-radius: 3px;
+                        width: 5px;
+                        height: 5px;
+                        border-radius: 2.5px;
                         background: #10b981;
                     }
                     Text {
-                        text: "ZenithBar • Hotkey: Ctrl+Shift+S";
-                        font-size: 9px;
+                        text: "ZenithBar • Ctrl+Shift+S";
+                        font-size: 8px;
                         color: #64748b;
                         vertical-alignment: center;
+                        overflow: elide;
+                        horizontal-stretch: 1;
                     }
                 }
 
