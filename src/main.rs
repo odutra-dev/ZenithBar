@@ -151,6 +151,16 @@ fn apply_settings_to_app(
     ui.set_sidebar_width_px(cfg.sidebar_width as f32);
     ui.set_bg_opacity_val(cfg.bg_opacity);
 
+    let target_h = if cfg.screen_index < monitors.len() {
+        monitors[cfg.screen_index].work_height
+    } else {
+        monitors.first().map(|m| m.work_height).unwrap_or(1080)
+    };
+    ui.window().set_size(slint::PhysicalSize::new(
+        cfg.sidebar_width,
+        target_h.max(600) as u32,
+    ));
+
     // Atualiza o AppBar nativo Win32
     if let Some(ab_mgr) = ab.as_mut() {
         if always_top_changed {
@@ -284,6 +294,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             monitors[0].clone()
         }
     };
+
+    ui.window().set_size(slint::PhysicalSize::new(
+        config.borrow().sidebar_width,
+        target_monitor.work_height.max(600) as u32,
+    ));
 
     // Gerenciador do AppBar e Ícone da Bandeja mantidos vivos
     let appbar_holder: Rc<RefCell<Option<AppBarManager>>> = Rc::new(RefCell::new(None));
