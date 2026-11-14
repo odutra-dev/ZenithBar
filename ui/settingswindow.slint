@@ -76,6 +76,7 @@ component TabButton inherits Rectangle {
 
 export component SettingsWindow inherits Window {
     title: "ZenithBar - Configurações";
+    icon: @image-url("../assets/icon.png");
     width: 540px;
     height: 620px;
     background: #111218f4;
@@ -140,18 +141,30 @@ export component SettingsWindow inherits Window {
         // Window Header
         HorizontalLayout {
             alignment: space-between;
-            VerticalLayout {
-                spacing: 2px;
-                Text {
-                    text: "Configurações do ZenithBar";
-                    font-size: 18px;
-                    font-weight: 800;
-                    color: #ffffff;
+            HorizontalLayout {
+                spacing: 12px;
+                alignment: center;
+
+                Image {
+                    source: @image-url("../assets/icon.png");
+                    width: 36px;
+                    height: 36px;
+                    vertical-alignment: center;
                 }
-                Text {
-                    text: "Personalize a ancoragem, hardware monitorado e estilo da barra";
-                    font-size: 11px;
-                    color: #64748b;
+
+                VerticalLayout {
+                    spacing: 2px;
+                    Text {
+                        text: "Configurações do ZenithBar";
+                        font-size: 18px;
+                        font-weight: 800;
+                        color: #ffffff;
+                    }
+                    Text {
+                        text: "Personalize a ancoragem, hardware monitorado e estilo da barra";
+                        font-size: 11px;
+                        color: #64748b;
+                    }
                 }
             }
         }

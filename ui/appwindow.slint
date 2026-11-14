@@ -112,6 +112,7 @@ component MetricSection inherits Rectangle {
 
 export component AppWindow inherits Window {
     title: "ZenithBar";
+    icon: @image-url("../assets/icon.png");
     width: 300px;
     no-frame: true;
     background: #0f1015f6;
@@ -207,40 +208,52 @@ export component AppWindow inherits Window {
                 padding: 10px;
                 alignment: space-between;
 
-                VerticalLayout {
+                HorizontalLayout {
                     alignment: center;
-                    spacing: 2px;
+                    spacing: 10px;
 
-                    HorizontalLayout {
-                        spacing: 6px;
-                        Text {
-                            text: root.time_str;
-                            font-size: 19px;
-                            font-weight: 800;
-                            color: #ffffff;
-                        }
-                        Text {
-                            text: root.hostname;
-                            font-size: 11px;
-                            font-weight: 600;
-                            color: #38bdf8;
-                            vertical-alignment: center;
-                            overflow: elide;
-                            visible: root.show_machine_name;
-                        }
+                    Image {
+                        source: @image-url("../assets/icon.png");
+                        width: 32px;
+                        height: 32px;
+                        vertical-alignment: center;
                     }
 
-                    if root.show_clock : HorizontalLayout {
-                        spacing: 8px;
-                        Text {
-                            text: root.date_str;
-                            font-size: 10px;
-                            color: #94a3b8;
+                    VerticalLayout {
+                        alignment: center;
+                        spacing: 2px;
+
+                        HorizontalLayout {
+                            spacing: 6px;
+                            Text {
+                                text: root.time_str;
+                                font-size: 19px;
+                                font-weight: 800;
+                                color: #ffffff;
+                            }
+                            Text {
+                                text: root.hostname;
+                                font-size: 11px;
+                                font-weight: 600;
+                                color: #38bdf8;
+                                vertical-alignment: center;
+                                overflow: elide;
+                                visible: root.show_machine_name;
+                            }
                         }
-                        Text {
-                            text: "• " + root.uptime_str;
-                            font-size: 10px;
-                            color: #64748b;
+
+                        if root.show_clock : HorizontalLayout {
+                            spacing: 8px;
+                            Text {
+                                text: root.date_str;
+                                font-size: 10px;
+                                color: #94a3b8;
+                            }
+                            Text {
+                                text: "• " + root.uptime_str;
+                                font-size: 10px;
+                                color: #64748b;
+                            }
                         }
                     }
                 }
@@ -589,10 +602,16 @@ export component AppWindow inherits Window {
                 HorizontalLayout {
                     alignment: center;
                     spacing: 6px;
+                    Image {
+                        source: @image-url("../assets/icon.png");
+                        width: 14px;
+                        height: 14px;
+                        vertical-alignment: center;
+                    }
                     Rectangle {
-                        width: 8px;
-                        height: 8px;
-                        border-radius: 4px;
+                        width: 6px;
+                        height: 6px;
+                        border-radius: 3px;
                         background: #10b981;
                     }
                     Text {
