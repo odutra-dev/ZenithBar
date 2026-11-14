@@ -30,18 +30,22 @@ fn log_msg(msg: &str) {
         .and_then(|mut f| writeln!(f, "[{}] {}", Local::now().format("%Y-%m-%d %H:%M:%S"), msg));
 }
 
-fn appbar_hide(ui: &AppWindow, ab: &mut Option<AppBarManager>, is_vis: &RefCell<bool>) {
+fn appbar_hide(#[allow(unused_variables)] ui: &AppWindow, ab: &mut Option<AppBarManager>, is_vis: &RefCell<bool>) {
     if let Some(ab_mgr) = ab.as_mut() {
         ab_mgr.unregister();
+        ab_mgr.hide_window();
     }
+    #[cfg(not(target_os = "windows"))]
     let _ = ui.hide();
     *is_vis.borrow_mut() = false;
     log_msg("Barra ocultada para a bandeja (AppBar liberado).");
 }
 
-fn appbar_show(ui: &AppWindow, ab: &mut Option<AppBarManager>, is_vis: &RefCell<bool>) {
+fn appbar_show(#[allow(unused_variables)] ui: &AppWindow, ab: &mut Option<AppBarManager>, is_vis: &RefCell<bool>) {
+    #[cfg(not(target_os = "windows"))]
     let _ = ui.show();
     if let Some(ab_mgr) = ab.as_mut() {
+        ab_mgr.show_window();
         ab_mgr.register();
     }
     *is_vis.borrow_mut() = true;
@@ -513,6 +517,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Timer de inicialização pós-mapeamento (150ms)
     let init_timer = slint::Timer::default();
+    #[allow(unused_variables)]
     let ui_weak_init = ui.as_weak();
     let is_vis_init = is_visible.clone();
     init_timer.start(
@@ -572,15 +577,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         } else if !cfg.initially_hidden {
                             ab.update_position();
                         }
-                        *appbar_ref.borrow_mut() = Some(ab);
 
                         if cfg.initially_hidden {
                             log_msg("Modo InitiallyHidden ativo: liberando desktop e recolhendo para a bandeja.");
-                            if let Some(ui) = ui_weak_init.upgrade() {
-                                let _ = ui.hide();
-                            }
+                            ab.hide_window();
                             *is_vis_init.borrow_mut() = false;
                         }
+                        *appbar_ref.borrow_mut() = Some(ab);
                     } else {
                         log_msg("Aviso: HWND nulo retornado por FindWindowW.");
                     }
@@ -698,8 +701,22 @@ fn apply_snapshot(ui: &AppWindow, snap: TelemetrySnapshot) {
     // Disks
     let mut slint_disks = Vec::new();
     for (i, d) in snap.disks.iter().enumerate() {
+        let clean_name = if d.name.trim().is_empty()
+            || d.name.eq_ignore_ascii_case(&d.mount)
+            || d.mount.starts_with(&d.name)
+        {
+            String::new()
+        } else {
+            d.name.clone()
+        };
+
         if i == 0 {
-            ui.set_disk_primary_name(format!("{} ({})", d.mount, d.name).into());
+            let primary_title = if clean_name.is_empty() {
+                d.mount.clone()
+            } else {
+                format!("{} ({})", d.mount, clean_name)
+            };
+            ui.set_disk_primary_name(primary_title.into());
             ui.set_disk_primary_usage(format!("{:.0} / {:.0} GB ({:.0}%)", d.used_gb, d.total_gb, d.percent * 100.0).into());
             ui.set_disk_primary_percent(d.percent);
             ui.set_disk_read_str(format!("{:.1} MB/s", d.read_mb_s).into());
@@ -707,7 +724,7 @@ fn apply_snapshot(ui: &AppWindow, snap: TelemetrySnapshot) {
         }
 
         slint_disks.push(DiskInfo {
-            name: d.name.clone().into(),
+            name: clean_name.into(),
             mount: d.mount.clone().into(),
             used_gb: format!("{:.0} GB", d.used_gb).into(),
             total_gb: format!("{:.0} GB", d.total_gb).into(),

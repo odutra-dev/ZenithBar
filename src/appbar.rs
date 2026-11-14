@@ -15,8 +15,9 @@ pub mod win32 {
         ABM_SETPOS,
     };
     use windows::Win32::UI::WindowsAndMessaging::{
-        GetWindowLongPtrW, SetWindowLongPtrW, SetWindowPos, GWL_EXSTYLE, GWL_STYLE,
-        HWND_NOTOPMOST, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_SHOWWINDOW, WS_POPUP, WS_VISIBLE,
+        GetWindowLongPtrW, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, ShowWindow,
+        GWL_EXSTYLE, GWL_STYLE, HWND_NOTOPMOST, HWND_TOPMOST, SWP_FRAMECHANGED, SWP_SHOWWINDOW,
+        SW_HIDE, SW_SHOW, WS_POPUP, WS_VISIBLE,
     };
 
     const WS_EX_TOOLWINDOW: isize = 0x00000080;
@@ -184,6 +185,23 @@ pub mod win32 {
             }
         }
 
+        pub fn hide_window(&self) {
+            if !self.hwnd.0.is_null() {
+                unsafe {
+                    let _ = ShowWindow(self.hwnd, SW_HIDE);
+                }
+            }
+        }
+
+        pub fn show_window(&self) {
+            if !self.hwnd.0.is_null() {
+                unsafe {
+                    let _ = ShowWindow(self.hwnd, SW_SHOW);
+                    let _ = SetForegroundWindow(self.hwnd);
+                }
+            }
+        }
+
         pub fn update_position(&self) {
             if self.hwnd.0.is_null() {
                 return;
@@ -347,6 +365,10 @@ pub mod win32 {
                 self.unregister();
             }
         }
+
+        pub fn hide_window(&self) {}
+
+        pub fn show_window(&self) {}
 
         pub fn update_position(&self) {
             crate::log_msg(&format!(

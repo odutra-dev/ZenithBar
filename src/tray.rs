@@ -35,7 +35,8 @@ pub mod win32 {
     const ID_TOGGLE_SIDE: usize = 1003;
     const ID_CYCLE_SCREEN: usize = 1004;
     const ID_RELOAD_SENSORS: usize = 1005;
-    const ID_EXIT: usize = 1006;
+    const ID_GITHUB: usize = 1006;
+    const ID_EXIT: usize = 1007;
 
     unsafe extern "system" {
         fn RegisterHotKey(hwnd: HWND, id: i32, fs_modifiers: u32, vk: u32) -> windows::core::BOOL;
@@ -204,13 +205,15 @@ pub mod win32 {
                 Err(_) => return,
             };
 
-            let _ = AppendMenuW(hmenu, MF_STRING, ID_TOGGLE_VISIBILITY, w!("👁  Mostrar / Ocultar Barra"));
-            let _ = AppendMenuW(hmenu, MF_STRING, ID_SETTINGS, w!("⚙  Configurações..."));
-            let _ = AppendMenuW(hmenu, MF_STRING, ID_TOGGLE_SIDE, w!("↔  Alternar Lado (Esq/Dir)"));
-            let _ = AppendMenuW(hmenu, MF_STRING, ID_CYCLE_SCREEN, w!("🖥  Alternar Monitor"));
-            let _ = AppendMenuW(hmenu, MF_STRING, ID_RELOAD_SENSORS, w!("🔄  Recarregar Sensores"));
+            let _ = AppendMenuW(hmenu, MF_STRING, ID_TOGGLE_VISIBILITY, w!("Mostrar / Ocultar Barra"));
+            let _ = AppendMenuW(hmenu, MF_STRING, ID_SETTINGS, w!("Configurações..."));
+            let _ = AppendMenuW(hmenu, MF_STRING, ID_TOGGLE_SIDE, w!("Alternar Lado (Esq/Dir)"));
+            let _ = AppendMenuW(hmenu, MF_STRING, ID_CYCLE_SCREEN, w!("Alternar Monitor"));
+            let _ = AppendMenuW(hmenu, MF_STRING, ID_RELOAD_SENSORS, w!("Recarregar Sensores"));
             let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, None);
-            let _ = AppendMenuW(hmenu, MF_STRING, ID_EXIT, w!("✕  Sair do ZenithBar"));
+            let _ = AppendMenuW(hmenu, MF_STRING, ID_GITHUB, w!("GitHub (Repositório)"));
+            let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, None);
+            let _ = AppendMenuW(hmenu, MF_STRING, ID_EXIT, w!("Sair do ZenithBar"));
 
             let mut pt = POINT::default();
             let _ = GetCursorPos(&mut pt);
@@ -241,6 +244,18 @@ pub mod win32 {
                 }
                 ID_RELOAD_SENSORS => {
                     SHOULD_RELOAD_SENSORS.store(true, Ordering::SeqCst);
+                }
+                ID_GITHUB => {
+                    use windows::Win32::UI::Shell::ShellExecuteW;
+                    use windows::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+                    let _ = ShellExecuteW(
+                        None,
+                        w!("open"),
+                        w!("https://github.com/odutra-dev/ZenithBar"),
+                        None,
+                        None,
+                        SW_SHOWNORMAL,
+                    );
                 }
                 ID_EXIT => {
                     std::process::exit(0);
