@@ -135,4 +135,4 @@ The repository includes a GitHub Actions workflow (`.github/workflows/release.ym
 
 ## License
 
-Distributed under the terms of the MIT License and the Apache License (Version 2.0).
+Distributed under the terms of the MIT License. See `LICENSE` for details.
