@@ -1,0 +1,689 @@
+import { Button, CheckBox, ComboBox, ScrollView, Slider } from "std-widgets.slint";
+
+component SettingItem inherits Rectangle {
+    in property <string> label: "Configuração";
+    in property <string> description: "";
+    height: desc_txt.text != "" ? 56px : 42px;
+    background: #00000020;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: #ffffff0a;
+
+    HorizontalLayout {
+        padding-left: 14px;
+        padding-right: 14px;
+        alignment: space-between;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            Text {
+                text: root.label;
+                font-size: 13px;
+                font-weight: 600;
+                color: #f1f5f9;
+            }
+            desc_txt := Text {
+                text: root.description;
+                font-size: 11px;
+                color: #94a3b8;
+                visible: self.text != "";
+            }
+        }
+
+        @children
+    }
+}
+
+component TabButton inherits Rectangle {
+    in property <string> title: "Tab";
+    in property <string> icon: "⚙";
+    in property <bool> active: false;
+    callback clicked();
+
+    height: 38px;
+    background: root.active ? #38bdf820 : #ffffff08;
+    border-radius: 6px;
+    border-width: 1px;
+    border-color: root.active ? #38bdf880 : #ffffff0f;
+
+    HorizontalLayout {
+        alignment: center;
+        spacing: 6px;
+        padding-left: 10px;
+        padding-right: 10px;
+
+        Text {
+            text: root.icon;
+            font-size: 14px;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.title;
+            font-size: 12px;
+            font-weight: root.active ? 700 : 500;
+            color: root.active ? #38bdf8 : #cbd5e1;
+            vertical-alignment: center;
+        }
+    }
+
+    TouchArea {
+        clicked => { root.clicked(); }
+        mouse-cursor: pointer;
+    }
+}
+
+export component SettingsWindow inherits Window {
+    title: "ZenithBar - Configurações";
+    width: 540px;
+    height: 620px;
+    background: #111218f4;
+    default-font-family: "Segoe UI Variable Display, Segoe UI, sans-serif";
+
+    // Callbacks
+    callback request_save();
+    callback request_apply();
+    callback request_close();
+    callback request_move_module_up(string);
+    callback request_move_module_down(string);
+
+    // Estado da Aba Ativa: 0=Geral, 1=Avançado, 2=Estilo, 3=Monitores, 4=Atalhos
+    in-out property <int> current_tab: 0;
+
+    // Aba Geral
+    in-out property <bool> dock_right: true;
+    in-out property <int> monitor_idx: 0;
+    in-out property <int> monitor_count: 1;
+    in-out property <bool> use_app_bar: true;
+    in-out property <bool> always_top: true;
+    in-out property <bool> run_at_startup: false;
+    in-out property <bool> initially_hidden: false;
+
+    // Aba Avançado
+    in-out property <int> polling_interval: 1000;
+    in-out property <float> ui_scale: 1.0;
+    in-out property <bool> show_tray_icon: true;
+    in-out property <bool> click_through: false;
+    in-out property <bool> collapse_menu_bar: false;
+    in-out property <bool> auto_update: true;
+
+    // Aba Estilo
+    in-out property <int> sidebar_width: 300;
+    in-out property <float> bg_opacity: 0.95;
+    in-out property <bool> text_align_right: false;
+    in-out property <bool> show_machine_name: true;
+    in-out property <bool> show_clock: true;
+    in-out property <bool> clock_24hr: true;
+    in-out property <bool> alert_blink: true;
+
+    // Aba Monitores
+    in-out property <bool> enable_cpu: true;
+    in-out property <bool> show_cpu_cores: true;
+    in-out property <bool> enable_ram: true;
+    in-out property <bool> enable_gpu: true;
+    in-out property <bool> enable_disks: true;
+    in-out property <bool> show_all_disks: false;
+    in-out property <bool> enable_network: true;
+    in-out property <bool> show_sparklines: true;
+
+    // Aba Atalhos
+    in-out property <string> hotkey_toggle: "Ctrl+Shift+S";
+    in-out property <string> hotkey_cycle_edge: "Ctrl+Shift+E";
+    in-out property <string> hotkey_cycle_screen: "Ctrl+Shift+M";
+    in-out property <string> hotkey_reserve_space: "Ctrl+Shift+R";
+
+    VerticalLayout {
+        padding: 16px;
+        spacing: 12px;
+
+        // Window Header
+        HorizontalLayout {
+            alignment: space-between;
+            VerticalLayout {
+                spacing: 2px;
+                Text {
+                    text: "Configurações do ZenithBar";
+                    font-size: 18px;
+                    font-weight: 800;
+                    color: #ffffff;
+                }
+                Text {
+                    text: "Personalize a ancoragem, hardware monitorado e estilo da barra";
+                    font-size: 11px;
+                    color: #64748b;
+                }
+            }
+        }
+
+        // Navigation Tabs (1:1 com SidebarDiagnostics)
+        HorizontalLayout {
+            spacing: 6px;
+
+            TabButton {
+                title: "Geral";
+                icon: "⚙";
+                active: root.current_tab == 0;
+                clicked => { root.current_tab = 0; }
+            }
+            TabButton {
+                title: "Avançado";
+                icon: "⚡";
+                active: root.current_tab == 1;
+                clicked => { root.current_tab = 1; }
+            }
+            TabButton {
+                title: "Estilo";
+                icon: "🎨";
+                active: root.current_tab == 2;
+                clicked => { root.current_tab = 2; }
+            }
+            TabButton {
+                title: "Monitores";
+                icon: "📊";
+                active: root.current_tab == 3;
+                clicked => { root.current_tab = 3; }
+            }
+            TabButton {
+                title: "Atalhos";
+                icon: "⌨";
+                active: root.current_tab == 4;
+                clicked => { root.current_tab = 4; }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: #ffffff10;
+        }
+
+        // Scrollable Tab View
+        ScrollView {
+            vertical-stretch: 1;
+
+            VerticalLayout {
+                spacing: 10px;
+                padding-right: 8px;
+
+                // ================= TAB 0: GERAL =================
+                if root.current_tab == 0 : VerticalLayout {
+                    spacing: 8px;
+
+                    SettingItem {
+                        label: "Posicionamento na Tela";
+                        description: "Borda do monitor onde o painel fica acoplado";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: center;
+                            Button {
+                                text: !root.dock_right ? "✔ Esquerda" : "Esquerda";
+                                primary: !root.dock_right;
+                                clicked => { root.dock_right = false; }
+                            }
+                            Button {
+                                text: root.dock_right ? "✔ Direita" : "Direita";
+                                primary: root.dock_right;
+                                clicked => { root.dock_right = true; }
+                            }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Monitor de Exibição";
+                        description: "Escolha qual tela exibirá a barra de diagnóstico";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: center;
+                            Button {
+                                text: root.monitor_idx == 0 ? "✔ Monitor 1 (Principal)" : "Monitor 1";
+                                primary: root.monitor_idx == 0;
+                                clicked => { root.monitor_idx = 0; }
+                            }
+                            if root.monitor_count > 1 : Button {
+                                text: root.monitor_idx == 1 ? "✔ Monitor 2" : "Monitor 2";
+                                primary: root.monitor_idx == 1;
+                                clicked => { root.monitor_idx = 1; }
+                            }
+                            if root.monitor_count > 2 : Button {
+                                text: root.monitor_idx == 2 ? "✔ Monitor 3" : "Monitor 3";
+                                primary: root.monitor_idx == 2;
+                                clicked => { root.monitor_idx = 2; }
+                            }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Reservar Espaço no Desktop (AppBar)";
+                        description: "Empurra janelas maximizadas para não cobrirem a barra";
+                        CheckBox {
+                            checked: root.use_app_bar;
+                            toggled => { root.use_app_bar = self.checked; }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Sempre no Topo (Always on Top)";
+                        description: "Mantém o painel visível sobre outras janelas normais";
+                        CheckBox {
+                            checked: root.always_top;
+                            toggled => { root.always_top = self.checked; }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Iniciar com o Windows";
+                        description: "Executa o ZenithBar automaticamente ao ligar o computador";
+                        CheckBox {
+                            checked: root.run_at_startup;
+                            toggled => { root.run_at_startup = self.checked; }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Iniciar Oculto";
+                        description: "Inicia minimizado direto na bandeja do sistema";
+                        CheckBox {
+                            checked: root.initially_hidden;
+                            toggled => { root.initially_hidden = self.checked; }
+                        }
+                    }
+                }
+
+                // ================= TAB 1: AVANÇADO =================
+                if root.current_tab == 1 : VerticalLayout {
+                    spacing: 8px;
+
+                    SettingItem {
+                        label: "Frequência de Atualização dos Sensores";
+                        description: "Intervalo de coleta de telemetria";
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: center;
+                            Button {
+                                text: root.polling_interval == 250 ? "✔ 250ms" : "250ms";
+                                primary: root.polling_interval == 250;
+                                clicked => { root.polling_interval = 250; }
+                            }
+                            Button {
+                                text: root.polling_interval == 500 ? "✔ 500ms" : "500ms";
+                                primary: root.polling_interval == 500;
+                                clicked => { root.polling_interval = 500; }
+                            }
+                            Button {
+                                text: root.polling_interval == 1000 ? "✔ 1s" : "1s";
+                                primary: root.polling_interval == 1000;
+                                clicked => { root.polling_interval = 1000; }
+                            }
+                            Button {
+                                text: root.polling_interval == 2000 ? "✔ 2s" : "2s";
+                                primary: root.polling_interval == 2000;
+                                clicked => { root.polling_interval = 2000; }
+                            }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Ícone na Bandeja do Sistema (Tray)";
+                        description: "Exibe o ícone ao lado do relógio do Windows com menu rápido";
+                        CheckBox {
+                            checked: root.show_tray_icon;
+                            toggled => { root.show_tray_icon = self.checked; }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Cliques Transparentes (Click-Through)";
+                        description: "Permite clicar através da barra nos itens atrás dela";
+                        CheckBox {
+                            checked: root.click_through;
+                            toggled => { root.click_through = self.checked; }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Recolher Botões de Ação do Cabeçalho";
+                        description: "Oculta botões ⚙ e ⇥ da barra para visual 100% minimalista";
+                        CheckBox {
+                            checked: root.collapse_menu_bar;
+                            toggled => { root.collapse_menu_bar = self.checked; }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Verificação Automática de Atualizações";
+                        description: "Checa periodicamente se há novas versões do ZenithBar";
+                        CheckBox {
+                            checked: root.auto_update;
+                            toggled => { root.auto_update = self.checked; }
+                        }
+                    }
+                }
+
+                // ================= TAB 2: ESTILO =================
+                if root.current_tab == 2 : VerticalLayout {
+                    spacing: 8px;
+
+                    SettingItem {
+                        label: "Largura da Barra Lateral";
+                        description: "Largura fixa em pixels reservada na tela";
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: center;
+                            Button {
+                                text: root.sidebar_width == 240 ? "✔ 240px" : "240px";
+                                primary: root.sidebar_width == 240;
+                                clicked => { root.sidebar_width = 240; }
+                            }
+                            Button {
+                                text: root.sidebar_width == 300 ? "✔ 300px" : "300px";
+                                primary: root.sidebar_width == 300;
+                                clicked => { root.sidebar_width = 300; }
+                            }
+                            Button {
+                                text: root.sidebar_width == 360 ? "✔ 360px" : "360px";
+                                primary: root.sidebar_width == 360;
+                                clicked => { root.sidebar_width = 360; }
+                            }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Opacidade do Fundo Acrílico";
+                        description: "Intensidade do efeito de vidro translúcido Fluent";
+                        HorizontalLayout {
+                            spacing: 6px;
+                            alignment: center;
+                            Button {
+                                text: root.bg_opacity < 0.80 ? "✔ 75%" : "75%";
+                                primary: root.bg_opacity < 0.80;
+                                clicked => { root.bg_opacity = 0.75; }
+                            }
+                            Button {
+                                text: root.bg_opacity >= 0.80 && root.bg_opacity < 0.95 ? "✔ 88%" : "88%";
+                                primary: root.bg_opacity >= 0.80 && root.bg_opacity < 0.95;
+                                clicked => { root.bg_opacity = 0.88; }
+                            }
+                            Button {
+                                text: root.bg_opacity >= 0.95 ? "✔ 96%" : "96%";
+                                primary: root.bg_opacity >= 0.95;
+                                clicked => { root.bg_opacity = 0.96; }
+                            }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Alinhamento do Texto";
+                        description: "Orientação dos textos e métricas nos cartões";
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: center;
+                            Button {
+                                text: !root.text_align_right ? "✔ Esquerda" : "Esquerda";
+                                primary: !root.text_align_right;
+                                clicked => { root.text_align_right = false; }
+                            }
+                            Button {
+                                text: root.text_align_right ? "✔ Direita" : "Direita";
+                                primary: root.text_align_right;
+                                clicked => { root.text_align_right = true; }
+                            }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Exibir Nome do Computador (Hostname)";
+                        description: "Exibe o nome da máquina no cartão superior";
+                        CheckBox {
+                            checked: root.show_machine_name;
+                            toggled => { root.show_machine_name = self.checked; }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Exibir Relógio e Data";
+                        description: "Exibe horário e data no topo da barra lateral";
+                        CheckBox {
+                            checked: root.show_clock;
+                            toggled => { root.show_clock = self.checked; }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Formato de Horário 24 Horas";
+                        description: "Desmarque para exibir no formato 12h (AM/PM)";
+                        CheckBox {
+                            checked: root.clock_24hr;
+                            toggled => { root.clock_24hr = self.checked; }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Alertas Visuais em Destaque";
+                        description: "Realça em vermelho temperaturas > 80°C e carga > 85%";
+                        CheckBox {
+                            checked: root.alert_blink;
+                            toggled => { root.alert_blink = self.checked; }
+                        }
+                    }
+                }
+
+                // ================= TAB 3: MONITORES & HARDWARE =================
+                if root.current_tab == 3 : VerticalLayout {
+                    spacing: 8px;
+
+                    SettingItem {
+                        label: "Módulo do Processador (CPU)";
+                        description: "Monitoramento de uso total, clock e temperaturas";
+                        CheckBox {
+                            checked: root.enable_cpu;
+                            toggled => { root.enable_cpu = self.checked; }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "  └ Grade de Micro-Barras por Núcleo";
+                        description: "Exibe uma micro-barra colorida para cada núcleo físico/lógico";
+                        CheckBox {
+                            checked: root.show_cpu_cores;
+                            toggled => { root.show_cpu_cores = self.checked; }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Módulo de Memória RAM";
+                        description: "Uso em GB, total do sistema e percentual ocupado";
+                        CheckBox {
+                            checked: root.enable_ram;
+                            toggled => { root.enable_ram = self.checked; }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Módulo da Placa de Vídeo (GPU)";
+                        description: "Carga 3D, temperatura da GPU, VRAM e fan RPM";
+                        CheckBox {
+                            checked: root.enable_gpu;
+                            toggled => { root.enable_gpu = self.checked; }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Módulo de Armazenamento (Discos)";
+                        description: "Espaço em disco e taxas de leitura/escrita em tempo real";
+                        CheckBox {
+                            checked: root.enable_disks;
+                            toggled => { root.enable_disks = self.checked; }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "  └ Listar Todas as Unidades Conectadas";
+                        description: "Exibe todos os volumes lógicos (C:, D:, E:...) ou apenas o principal";
+                        CheckBox {
+                            checked: root.show_all_disks;
+                            toggled => { root.show_all_disks = self.checked; }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Módulo de Rede (Ethernet / Wi-Fi)";
+                        description: "Velocidades de Download/Upload, IP Local e IP WAN";
+                        CheckBox {
+                            checked: root.enable_network;
+                            toggled => { root.enable_network = self.checked; }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Gráficos de Histórico em Tempo Real";
+                        description: "Exibe curvas de tendência Sparklines contínuas nos módulos";
+                        CheckBox {
+                            checked: root.show_sparklines;
+                            toggled => { root.show_sparklines = self.checked; }
+                        }
+                    }
+                }
+
+                // ================= TAB 4: ATALHOS DE TECLADO =================
+                if root.current_tab == 4 : VerticalLayout {
+                    spacing: 8px;
+
+                    SettingItem {
+                        label: "Alternar Visibilidade da Barra (Toggle)";
+                        description: "Oculta ou reexibe a barra em qualquer aplicativo ou jogo";
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 8px;
+                            Rectangle {
+                                background: #ffffff10;
+                                border-radius: 4px;
+                                border-width: 1px;
+                                border-color: #38bdf840;
+                                height: 30px;
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    Text {
+                                        text: root.hotkey_toggle;
+                                        color: #38bdf8;
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Alternar Lado da Tela (Cycle Edge)";
+                        description: "Transfere instantaneamente a barra entre Esquerda e Direita";
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 8px;
+                            Rectangle {
+                                background: #ffffff10;
+                                border-radius: 4px;
+                                border-width: 1px;
+                                border-color: #a855f740;
+                                height: 30px;
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    Text {
+                                        text: root.hotkey_cycle_edge;
+                                        color: #a855f7;
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Alternar Monitor Ativo (Cycle Screen)";
+                        description: "Move a barra para o próximo monitor conectado";
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 8px;
+                            Rectangle {
+                                background: #ffffff10;
+                                border-radius: 4px;
+                                border-width: 1px;
+                                border-color: #10b98140;
+                                height: 30px;
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    Text {
+                                        text: root.hotkey_cycle_screen;
+                                        color: #10b981;
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    SettingItem {
+                        label: "Alternar Reserva de Espaço (AppBar)";
+                        description: "Liga/desliga a reserva de espaço nas janelas maximizadas";
+                        HorizontalLayout {
+                            alignment: center;
+                            spacing: 8px;
+                            Rectangle {
+                                background: #ffffff10;
+                                border-radius: 4px;
+                                border-width: 1px;
+                                border-color: #f59e0b40;
+                                height: 30px;
+                                HorizontalLayout {
+                                    padding-left: 12px;
+                                    padding-right: 12px;
+                                    Text {
+                                        text: root.hotkey_reserve_space;
+                                        color: #f59e0b;
+                                        font-size: 12px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: #ffffff15;
+        }
+
+        // Bottom Action Bar (1:1 com SidebarDiagnostics: Cancelar, Aplicar, Salvar)
+        HorizontalLayout {
+            spacing: 10px;
+            alignment: end;
+
+            Button {
+                text: "Cancelar";
+                clicked => { root.request_close(); }
+            }
+
+            Button {
+                text: "Aplicar";
+                clicked => { root.request_apply(); }
+            }
+
+            Button {
+                text: "Salvar Alterações";
+                primary: true;
+                clicked => { root.request_save(); }
+            }
+        }
+    }
+}
