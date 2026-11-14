@@ -37,12 +37,22 @@ ZenithBar uses a dual-window, decoupled multi-threaded architecture:
 
 ## Prerequisites
 
-- Windows 10 (version 1809 or higher) or Windows 11 (x86_64).
-- Rust 1.80 or newer with the `x86_64-pc-windows-gnu` or `x86_64-pc-windows-msvc` target toolchain.
+- Windows 10 (version 1809 or higher), Windows 11 (x86_64), or Linux (x86_64 with X11 or Wayland).
+- Rust 1.80 or newer.
 
 ---
 
 ## Building from Source
+
+### Native Linux Build and AppImage
+
+```bash
+cargo build --release
+./scripts/build-appimage.sh
+```
+
+The standalone AppImage will be generated at:
+`ZenithBar-x86_64.AppImage`
 
 ### Native Windows Build (MSVC)
 
@@ -53,7 +63,7 @@ cargo build --release
 The optimized binary is generated at:
 `target/release/ZenithBar.exe`
 
-### Cross-Compilation from Linux (MinGW GNU)
+### Cross-Compilation for Windows from Linux (MinGW GNU)
 
 ```bash
 cargo build --release --target x86_64-pc-windows-gnu
@@ -64,7 +74,7 @@ The binary will be located at:
 
 ### Binary Size Optimizations
 
-ZenithBar is pre-configured with whole-program Link Time Optimization (`lto = "fat"`), single codegen unit (`codegen-units = 1`), compact instruction density (`opt-level = "z"`), and automatic symbol stripping (`strip = true`), resulting in a release binary under 9 MB.
+ZenithBar is pre-configured with whole-program Link Time Optimization (`lto = "fat"`), single codegen unit (`codegen-units = 1`), compact instruction density (`opt-level = "z"`), and automatic symbol stripping (`strip = true`), resulting in release binaries under 9 MB.
 
 ---
 
@@ -128,7 +138,8 @@ The repository includes a GitHub Actions workflow (`.github/workflows/release.ym
 - Version Determination: Automatically parses commit history following Conventional Commits (`feat:`, `fix:`, `perf:`, `refactor:`, `chore:`, breaking changes). When no prior tag exists, the initial release tag defaults to `v0.1.0`.
 - Release Assets:
   - `ZenithBar-windows-x64.zip` (containing `ZenithBar.exe`, `Settings.json`, and `README.md`)
-  - Standalone `ZenithBar.exe`
+  - Standalone `ZenithBar.exe` for Windows
+  - `ZenithBar-x86_64.AppImage` for Linux
   - `SHA256SUMS.txt` cryptographic verification file
 
 ---
