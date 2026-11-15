@@ -41,36 +41,41 @@ component TabButton inherits Rectangle {
     in property <bool> active: false;
     callback clicked();
 
+    horizontal-stretch: 1;
     height: 38px;
-    background: root.active ? #38bdf820 : #ffffff08;
+    background: root.active ? #38bdf825 : (touch.has-hover ? #ffffff12 : #ffffff08);
     border-radius: 6px;
     border-width: 1px;
-    border-color: root.active ? #38bdf880 : #ffffff0f;
+    border-color: root.active ? #38bdf890 : #ffffff0f;
 
     HorizontalLayout {
         alignment: center;
-        spacing: 6px;
-        padding-left: 10px;
-        padding-right: 10px;
+        spacing: 7px;
+        padding-left: 8px;
+        padding-right: 8px;
 
-        Image {
-            source: root.icon_source;
-            width: 14px;
-            height: 14px;
-            colorize: root.active ? #38bdf8 : #cbd5e1;
-            vertical-alignment: center;
+        VerticalLayout {
+            alignment: center;
+            Image {
+                source: root.icon_source;
+                width: 15px;
+                height: 15px;
+                colorize: root.active ? #38bdf8 : #cbd5e1;
+            }
         }
 
-        Text {
-            text: root.title;
-            font-size: 12px;
-            font-weight: root.active ? 700 : 500;
-            color: root.active ? #38bdf8 : #cbd5e1;
-            vertical-alignment: center;
+        VerticalLayout {
+            alignment: center;
+            Text {
+                text: root.title;
+                font-size: 12px;
+                font-weight: root.active ? 700 : 500;
+                color: root.active ? #38bdf8 : #cbd5e1;
+            }
         }
     }
 
-    TouchArea {
+    touch := TouchArea {
         clicked => { root.clicked(); }
         mouse-cursor: pointer;
     }

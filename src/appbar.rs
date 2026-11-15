@@ -213,12 +213,16 @@ pub mod win32 {
                     DockEdge::Right => ABE_RIGHT,
                 };
 
+                let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(self.hwnd);
+                let scale = if dpi > 0 { dpi as f32 / 96.0 } else { 1.0 };
+                let physical_w = (self.width as f32 * scale).round() as i32;
+
                 let x = match self.edge {
                     DockEdge::Left => self.monitor.work_left,
-                    DockEdge::Right => self.monitor.work_right - self.width,
+                    DockEdge::Right => self.monitor.work_right - physical_w,
                 };
                 let y = self.monitor.work_top;
-                let w = self.width;
+                let w = physical_w;
                 let h = self.monitor.work_height;
 
                 let rect = RECT {
@@ -255,8 +259,12 @@ pub mod win32 {
                     y,
                     w,
                     h,
-                    SWP_SHOWWINDOW | SWP_FRAMECHANGED,
+                    SWP_SHOWWINDOW | SWP_FRAMECHANGED | windows::Win32::UI::WindowsAndMessaging::SWP_NOACTIVATE,
                 );
+
+                use windows::Win32::Graphics::Gdi::{InvalidateRect, UpdateWindow};
+                let _ = InvalidateRect(Some(self.hwnd), None, true);
+                let _ = UpdateWindow(self.hwnd);
             }
         }
 
