@@ -1,149 +1,46 @@
-# ZenithBar
+# <img src="assets/icon.png" width="48" height="48" valign="middle" /> ZenithBar
 
-A lightweight, modern hardware diagnostics and telemetry sidebar for Windows 10 and Windows 11 written in Rust.
+A modern, lightweight hardware diagnostics and telemetry sidebar for Windows and Linux, built in Rust.
 
-ZenithBar is inspired by SidebarDiagnostics, redesigned from the ground up for minimal resource utilization, native Windows Shell integration, and a modern Fluent / Acrylic interface.
-
----
-
-## Key Highlights
-
-- Minimal Memory Footprint: Consumes approximately 15 MB to 25 MB of RAM under active monitoring (compared to 100 MB - 200 MB+ typical for managed runtime implementations).
-- Negligible CPU Utilization: Less than 0.1% CPU usage when idle, powered by retained-mode rendering and decoupled polling timers.
-- Native Windows Desktop Integration: Full Windows Shell AppBar (`SHAppBarMessage`) support that docks to the left or right screen edge, reserving the desktop work area so maximized windows do not overlap the sidebar.
-- Fluent Dark Glass Aesthetics: Desktop Window Manager (DWM) Acrylic blur and dark mode system styling.
-- Multi-Monitor Support: Dynamic display selection and resolution adaptation via `EnumDisplayMonitors` and `GetMonitorInfoW`.
-- Hardware Telemetry: Multi-core CPU utilization, package clock, system memory distribution, GPU monitoring, per-disk read/write throughput, network interface throughput, and external IP lookup.
-- Dedicated Settings Interface: Dedicated five-tab settings window providing 1:1 functional parity with original configuration models (General, Advanced, Customize, Hardware, Hotkeys).
-- System Tray & Global Shortcuts: Full system tray integration with right-click context menu and global hotkeys (`RegisterHotKey`) for immediate visibility toggle (`Ctrl+Shift+S`).
-- Zero Runtime Dependencies: Compiled to a single native executable with no dependency on the .NET Runtime or Visual C++ Redistributable packages.
+ZenithBar is inspired by [Sidebar Diagnostics](https://github.com/ArcadeRenegade/SidebarDiagnostics), reimagined with a modern Fluent Acrylic design, multi-monitor AppBar docking, and native system integration.
 
 ---
 
-## Architecture Overview
+### Features
 
-ZenithBar uses a dual-window, decoupled multi-threaded architecture:
-
-1. Main Process (STA):
-   The primary thread operates as a Single-Threaded Apartment (STA), hosting the Slint UI event loop, the native Windows message dispatch pump, the AppBar message receiver, and the system tray notification icon.
-
-2. Telemetry Engine (MTA):
-   Hardware sampling runs asynchronously in an isolated background thread. Metrics are gathered at configurable intervals (default: 1000 ms) and dispatched to the UI thread via thread-safe channels (`std::sync::mpsc`).
-
-3. Window Hierarchy & Shell Registration:
-   The sidebar window is configured with `WS_EX_TOOLWINDOW` and explicitly stripped of `WS_EX_APPWINDOW`, ensuring it does not occupy space in the Windows Taskbar or Alt+Tab switcher during normal desktop monitoring. The Settings window is managed as a standard modal dialog that displays in the taskbar only while open.
+- **Hardware Telemetry:** Real-time monitoring for CPU, RAM, GPU, storage drives, and network throughput.
+- **Desktop AppBar Docking:** Docks seamlessly to the left or right edge of your screen, reserving the desktop work area so maximized windows do not overlap.
+- **Fluent Acrylic Aesthetic:** Modern translucent glass styling with subtle animations and dark mode theme.
+- **Multi-Monitor & DPI Aware:** Dynamically select monitors with crisp scaling on any display resolution.
+- **Customizable UI:** Toggle individual hardware cards, adjust sidebar width (240px, 300px, 360px), background opacity, and text alignment.
+- **System Tray & Hotkeys:** Control visibility instantly via the system tray menu or with global hotkey `Ctrl+Shift+S`.
 
 ---
 
-## Prerequisites
+### Prerequisites
 
-- Windows 10 (version 1809 or higher), Windows 11 (x86_64), or Linux (x86_64 with X11 or Wayland).
-- Rust 1.80 or newer.
-
----
-
-## Building from Source
-
-### Native Linux Build and AppImage
-
-```bash
-cargo build --release
-./scripts/build-appimage.sh
-```
-
-The standalone AppImage will be generated at:
-`ZenithBar-x86_64.AppImage`
-
-### Native Windows Build (MSVC)
-
-```bash
-cargo build --release
-```
-
-The optimized binary is generated at:
-`target/release/ZenithBar.exe`
-
-### Cross-Compilation for Windows from Linux (MinGW GNU)
-
-```bash
-cargo build --release --target x86_64-pc-windows-gnu
-```
-
-The binary will be located at:
-`target/x86_64-pc-windows-gnu/release/ZenithBar.exe`
-
-### Binary Size Optimizations
-
-ZenithBar is pre-configured with whole-program Link Time Optimization (`lto = "fat"`), single codegen unit (`codegen-units = 1`), compact instruction density (`opt-level = "z"`), and automatic symbol stripping (`strip = true`), resulting in release binaries under 9 MB.
+- **Windows:** Windows 10 (version 1809 or higher) or Windows 11 (64-bit).
+- **Linux:** x86_64 desktop environment (X11 or Wayland).
+- Zero external runtime dependencies: standalone executable with no .NET or Visual C++ runtime required.
 
 ---
 
-## Configuration
+### Configuration
 
-ZenithBar loads and persists preferences in standard JSON format:
+ZenithBar can be configured directly from the graphical **Settings** window (accessible via the tray icon menu or the gear button at the top).
 
-- Portable Mode: If a `Settings.json` file is present in the same directory as `ZenithBar.exe`, configuration is read and saved locally.
-- Standard Mode: If no local file is detected, configuration is automatically stored in `%LOCALAPPDATA%\ZenithBar\Settings.json`.
+Settings are stored in JSON format:
+- **Portable Mode:** If a `Settings.json` file is present in the same folder as `ZenithBar.exe`, settings are read and saved locally.
+- **Standard Mode:** Otherwise, settings are automatically stored in `%LOCALAPPDATA%\ZenithBar\Settings.json`.
 
-### Example `Settings.json`
-
-```json
-{
-  "DockEdge": "Right",
-  "ScreenIndex": 0,
-  "Culture": "en-US",
-  "UseAppBar": true,
-  "AlwaysTop": true,
-  "AutoUpdate": true,
-  "RunAtStartup": false,
-  "UiScale": 1.0,
-  "PollingInterval": 1000,
-  "ToolbarMode": true,
-  "ClickThrough": false,
-  "ShowTrayIcon": true,
-  "CollapseMenuBar": false,
-  "InitiallyHidden": false,
-  "SidebarWidth": 300,
-  "BgOpacity": 0.95,
-  "TextAlign": "Left",
-  "FontSize": 14,
-  "FontColor": "#ffffff",
-  "AlertFontColor": "#ef4444",
-  "AlertBlink": true,
-  "ShowMachineName": true,
-  "ShowClock": true,
-  "Clock24hr": true,
-  "EnableCpu": true,
-  "EnableRam": true,
-  "EnableGpu": true,
-  "EnableDisks": true,
-  "EnableNetwork": true,
-  "ShowCpuCores": true,
-  "ShowAllDisks": false,
-  "ShowSparklines": true,
-  "HotkeyToggle": "Ctrl+Shift+S",
-  "HotkeyCycleEdge": "Ctrl+Shift+E",
-  "HotkeyCycleScreen": "Ctrl+Shift+M",
-  "HotkeyReserveSpace": "Ctrl+Shift+R"
-}
-```
+#### Default Hotkeys
+- `Ctrl + Shift + S`: Toggle sidebar visibility
+- `Ctrl + Shift + E`: Cycle dock edge (Left / Right)
+- `Ctrl + Shift + M`: Cycle target monitor
+- `Ctrl + Shift + R`: Toggle workspace reservation (AppBar)
 
 ---
 
-## Automated Releases
+### License
 
-The repository includes a GitHub Actions workflow (`.github/workflows/release.yml`) that automates version management and release distribution:
-
-- Trigger: Pushes to the `main` branch.
-- Version Determination: Automatically parses commit history following Conventional Commits (`feat:`, `fix:`, `perf:`, `refactor:`, `chore:`, breaking changes). When no prior tag exists, the initial release tag defaults to `v0.1.0`.
-- Release Assets:
-  - `ZenithBar-windows-x64.zip` (containing `ZenithBar.exe`, `Settings.json`, and `README.md`)
-  - Standalone `ZenithBar.exe` for Windows
-  - `ZenithBar-x86_64.AppImage` for Linux
-  - `SHA256SUMS.txt` cryptographic verification file
-
----
-
-## License
-
-Distributed under the terms of the MIT License. See `LICENSE` for details.
+Distributed under the MIT License. See [LICENSE](LICENSE) for details.
