@@ -97,10 +97,11 @@ fn apply_settings_to_app(
     cfg: &mut AppConfig,
     ab: &mut Option<AppBarManager>,
     monitors: &[monitor::MonitorDevice],
+    interval_tx: &std::sync::mpsc::Sender<u64>,
 ) {
     let edge_changed = cfg.is_dock_right() != sw.get_dock_right();
     let monitor_changed = cfg.screen_index != (sw.get_monitor_idx().max(0) as usize);
-    let width_changed = cfg.sidebar_width != (sw.get_sidebar_width().max(200) as u32);
+    let width_changed = cfg.sidebar_width != (sw.get_sidebar_width().clamp(180, 360) as u32);
     let appbar_changed = cfg.use_app_bar != sw.get_use_app_bar();
     let always_top_changed = cfg.always_top != sw.get_always_top();
     let click_through_changed = cfg.click_through != sw.get_click_through();
@@ -112,14 +113,15 @@ fn apply_settings_to_app(
     cfg.run_at_startup = sw.get_run_at_startup();
     cfg.initially_hidden = sw.get_initially_hidden();
 
-    cfg.polling_interval = sw.get_polling_interval().max(100) as u64;
+    cfg.polling_interval = sw.get_polling_interval().clamp(100, 10000) as u64;
+    let _ = interval_tx.send(cfg.polling_interval);
     cfg.ui_scale = sw.get_ui_scale();
     cfg.show_tray_icon = sw.get_show_tray_icon();
     cfg.click_through = sw.get_click_through();
     cfg.collapse_menu_bar = sw.get_collapse_menu_bar();
     cfg.auto_update = sw.get_auto_update();
 
-    cfg.sidebar_width = sw.get_sidebar_width().max(200) as u32;
+    cfg.sidebar_width = sw.get_sidebar_width().clamp(180, 360) as u32;
     cfg.bg_opacity = sw.get_bg_opacity();
     cfg.text_align = if sw.get_text_align_right() { "Right".into() } else { "Left".into() };
     cfg.show_machine_name = sw.get_show_machine_name();
@@ -154,7 +156,18 @@ fn apply_settings_to_app(
     ui.set_collapse_menu_bar(cfg.collapse_menu_bar);
     ui.set_sidebar_width_px(cfg.sidebar_width as f32);
     ui.set_bg_opacity_val(cfg.bg_opacity);
+
+    let target_h = if cfg.screen_index < monitors.len() {
+        monitors[cfg.screen_index].work_height
+    } else {
+        monitors.first().map(|m| m.work_height).unwrap_or(1080)
+    };
+    let scale = ui.window().scale_factor();
+    let logical_h = if scale > 0.0 { target_h as f32 / scale } else { target_h as f32 };
+    ui.set_sidebar_height_px(logical_h);
     ui.window().request_redraw();
+
+    tray::win32::set_always_top_state(cfg.always_top);
 
     // Atualiza o AppBar nativo Win32
     if let Some(ab_mgr) = ab.as_mut() {
@@ -205,7 +218,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log_msg("--- ZenithBar Iniciando ---");
 
-    log_msg("1. Carregando configurações 1:1...");
+    log_msg("1. Carregando configuraÃ§Ãµes 1:1...");
     let config = Rc::new(RefCell::new(AppConfig::load()));
 
     log_msg("2. Criando janela principal AppWindow (no-frame, STA)...");
@@ -221,9 +234,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             unsafe {
                 use windows::core::HSTRING;
                 use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONERROR, MB_OK};
-                let title = HSTRING::from("ZenithBar - Erro de Renderização");
+                let title = HSTRING::from("ZenithBar - Erro de RenderizaÃ§Ã£o");
                 let body = HSTRING::from(format!(
-                    "Falha ao inicializar a interface gráfica Slint:\n{}\n\nVerifique se os drivers de vídeo estão atualizados.",
+                    "Falha ao inicializar a interface grÃ¡fica Slint:\n{}\n\nVerifique se os drivers de vÃ­deo estÃ£o atualizados.",
                     err_msg
                 ));
                 let _ = MessageBoxW(None, &body, &title, MB_OK | MB_ICONERROR);
@@ -232,7 +245,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    log_msg("3. Criando janela separada de Configurações de 5 Abas 1:1...");
+    log_msg("3. Criando janela separada de ConfiguraÃ§Ãµes de 5 Abas 1:1...");
     let settings_ui = match SettingsWindow::new() {
         Ok(win) => {
             log_msg("Janela SettingsWindow instanciada com sucesso.");
@@ -266,15 +279,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     log_msg("4. Inicializando thread de telemetria isolada em background (MTA)...");
     let (tx, rx) = std::sync::mpsc::channel::<TelemetrySnapshot>();
+    let (interval_tx, interval_rx) = std::sync::mpsc::channel::<u64>();
+    let initial_polling_interval = config.borrow().polling_interval.clamp(100, 10000);
     std::thread::spawn(move || {
         log_msg("[Telemetry Thread] Iniciada com sucesso.");
         let mut engine = TelemetryEngine::new();
+        let mut interval = initial_polling_interval;
         loop {
             let snap = engine.snapshot();
             if tx.send(snap).is_err() {
                 break;
             }
-            std::thread::sleep(Duration::from_millis(1000));
+            match interval_rx.recv_timeout(Duration::from_millis(interval)) {
+                Ok(mut next) => {
+                    while let Ok(newer) = interval_rx.try_recv() {
+                        next = newer;
+                    }
+                    interval = next.clamp(100, 10000);
+                    log_msg(&format!("[Telemetry Thread] Novo intervalo ativo: {} ms", interval));
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {},
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            }
         }
     });
 
@@ -290,7 +316,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // Gerenciador do AppBar e Ícone da Bandeja mantidos vivos
+    {
+        let scale = ui.window().scale_factor();
+        let logical_h = if scale > 0.0 { target_monitor.work_height as f32 / scale } else { target_monitor.work_height as f32 };
+        ui.set_sidebar_height_px(logical_h);
+        tray::win32::set_always_top_state(config.borrow().always_top);
+    }
+
+    // Gerenciador do AppBar e Ãcone da Bandeja mantidos vivos
     let appbar_holder: Rc<RefCell<Option<AppBarManager>>> = Rc::new(RefCell::new(None));
     let tray_holder: Rc<RefCell<Option<TrayIcon>>> = Rc::new(RefCell::new(None));
 
@@ -345,7 +378,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // O botão '✕' no rodapé oculta para a bandeja (AppBarHide) liberando o desktop
+    // O botÃ£o 'âœ•' no rodapÃ© oculta para a bandeja (AppBarHide) liberando o desktop
     let ui_weak_quit = ui.as_weak();
     let appbar_quit = appbar_holder.clone();
     let is_vis_quit = is_visible.clone();
@@ -357,7 +390,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // Callbacks da Janela de Configurações
+    // Callbacks da Janela de ConfiguraÃ§Ãµes
     let settings_weak_close = settings_ui.as_weak();
     settings_ui.on_request_close(move || {
         if let Some(sw) = settings_weak_close.upgrade() {
@@ -366,6 +399,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // APLICAR (em tempo real)
+    let interval_apply = interval_tx.clone();
     let settings_weak_apply = settings_ui.as_weak();
     let config_apply = config.clone();
     let ui_weak_apply = ui.as_weak();
@@ -375,12 +409,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let (Some(sw), Some(ui)) = (settings_weak_apply.upgrade(), ui_weak_apply.upgrade()) {
             let mut cfg = config_apply.borrow_mut();
             if let Ok(mut ab_guard) = appbar_apply.try_borrow_mut() {
-                apply_settings_to_app(&ui, &sw, &mut cfg, &mut ab_guard, &monitors_apply);
+                apply_settings_to_app(&ui, &sw, &mut cfg, &mut ab_guard, &monitors_apply, &interval_apply);
             }
         }
     });
 
     // SALVAR (aplica em tempo real e fecha a janela)
+    let interval_save = interval_tx.clone();
     let settings_weak_save = settings_ui.as_weak();
     let config_save = config.clone();
     let ui_weak_save = ui.as_weak();
@@ -390,7 +425,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let (Some(sw), Some(ui)) = (settings_weak_save.upgrade(), ui_weak_save.upgrade()) {
             let mut cfg = config_save.borrow_mut();
             if let Ok(mut ab_guard) = appbar_save.try_borrow_mut() {
-                apply_settings_to_app(&ui, &sw, &mut cfg, &mut ab_guard, &monitors_save);
+                apply_settings_to_app(&ui, &sw, &mut cfg, &mut ab_guard, &monitors_save, &interval_save);
             }
             let _ = sw.hide();
         }
@@ -400,7 +435,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_ref = config.clone();
     let tray_ref = tray_holder.clone();
 
-    // Timer de recebimento de telemetria periódico (250ms) e polling de eventos da bandeja
+    // Timer de recebimento de telemetria periÃ³dico (250ms) e polling de eventos da bandeja
     let ui_weak_timer = ui.as_weak();
     let settings_weak_timer = settings_ui.as_weak();
     let rx_ref = Rc::new(RefCell::new(rx));
@@ -413,7 +448,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let telemetry_timer = slint::Timer::default();
     telemetry_timer.start(
         slint::TimerMode::Repeated,
-        Duration::from_millis(250),
+        Duration::from_millis(100),
         move || {
             // Poll eventos da bandeja (Tray)
             if let Ok(tray_guard) = tray_ref.try_borrow() {
@@ -474,6 +509,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if events.reload_sensors {
                         log_msg("Recarregar sensores solicitado via menu da bandeja.");
                     }
+
+                    if events.update_pos {
+                        if let Ok(ab_guard) = appbar_tray.try_borrow() {
+                            if let Some(ab) = ab_guard.as_ref() {
+                                ab.update_position();
+                            }
+                        }
+                    }
                 }
             }
 
@@ -501,7 +544,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     );
 
-    // Timer de inicialização pós-mapeamento (150ms)
+    // Timer de inicializaÃ§Ã£o pÃ³s-mapeamento (150ms)
     let init_timer = slint::Timer::default();
     #[allow(unused_variables)]
     let ui_weak_init = ui.as_weak();
@@ -510,7 +553,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         slint::TimerMode::SingleShot,
         Duration::from_millis(150),
         move || {
-            log_msg("5. Timer pós-mapeamento: aplicando estilos de janela, DWM, Tray e AppBar...");
+            log_msg("5. Timer pÃ³s-mapeamento: aplicando estilos de janela, DWM, Tray e AppBar...");
             #[cfg(target_os = "windows")]
             unsafe {
                 use windows::core::w;
@@ -530,10 +573,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if cfg.show_tray_icon {
                             let mut tray = TrayIcon::new(hwnd_isize);
                             if tray.init() {
-                                log_msg("Ícone na bandeja do sistema inicializado com sucesso.");
+                                log_msg("Ãcone na bandeja do sistema inicializado com sucesso.");
                                 *tray_holder.borrow_mut() = Some(tray);
                             } else {
-                                log_msg("Aviso: Falha ao inicializar ícone na bandeja.");
+                                log_msg("Aviso: Falha ao inicializar Ã­cone na bandeja.");
                             }
                         }
 
@@ -574,7 +617,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         log_msg("Aviso: HWND nulo retornado por FindWindowW.");
                     }
                 } else {
-                    log_msg("Aviso: FindWindowW não encontrou a janela ZenithBar.");
+                    log_msg("Aviso: FindWindowW nÃ£o encontrou a janela ZenithBar.");
                 }
             }
 
@@ -585,7 +628,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if cfg.show_tray_icon {
                     let mut tray = TrayIcon::new(0);
                     if tray.init() {
-                        log_msg("Ícone na bandeja do sistema inicializado com sucesso.");
+                        log_msg("Ãcone na bandeja do sistema inicializado com sucesso.");
                         *tray_holder.borrow_mut() = Some(tray);
                     }
                 }
@@ -642,10 +685,10 @@ fn apply_snapshot(ui: &AppWindow, snap: TelemetrySnapshot) {
     ui.set_cpu_clock_str(format!("{:.2} GHz", snap.cpu.clock_ghz).into());
     if let Some(temp) = snap.cpu.temperature_c {
         ui.set_cpu_temp_val(temp);
-        ui.set_cpu_temp_str(format!("{:.0} °C", temp).into());
+        ui.set_cpu_temp_str(format!("{:.0} Â°C", temp).into());
     } else {
         ui.set_cpu_temp_val(0.0);
-        ui.set_cpu_temp_str("-- °C".into());
+        ui.set_cpu_temp_str("-- Â°C".into());
     }
     let cpu_hist = Rc::new(VecModel::from(snap.cpu.history));
     ui.set_cpu_history(ModelRc::from(cpu_hist));
@@ -669,10 +712,10 @@ fn apply_snapshot(ui: &AppWindow, snap: TelemetrySnapshot) {
         ui.set_gpu_usage_str(format!("{:.0}%", snap.gpu.usage * 100.0).into());
         if let Some(temp) = snap.gpu.temperature_c {
             ui.set_gpu_temp_val(temp);
-            ui.set_gpu_temp_str(format!("{:.0} °C", temp).into());
+            ui.set_gpu_temp_str(format!("{:.0} Â°C", temp).into());
         } else {
             ui.set_gpu_temp_val(0.0);
-            ui.set_gpu_temp_str("-- °C".into());
+            ui.set_gpu_temp_str("-- Â°C".into());
         }
         ui.set_gpu_vram_str(format!("{:.1} / {:.1} GB", snap.gpu.vram_used_gb, snap.gpu.vram_total_gb).into());
         if let Some(fan) = snap.gpu.fan_rpm {
