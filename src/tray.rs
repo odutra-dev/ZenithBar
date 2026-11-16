@@ -56,9 +56,20 @@ pub mod win32 {
     static SHOULD_RELOAD_SENSORS: AtomicBool = AtomicBool::new(false);
     static SHOULD_UPDATE_POS: AtomicBool = AtomicBool::new(false);
     static IS_ALWAYS_TOP: AtomicBool = AtomicBool::new(true);
+    static TRAY_CULTURE: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
 
     pub fn set_always_top_state(always_top: bool) {
         IS_ALWAYS_TOP.store(always_top, Ordering::SeqCst);
+    }
+
+    pub fn set_tray_culture(culture: &str) {
+        if let Ok(mut lock) = TRAY_CULTURE.write() {
+            *lock = culture.to_string();
+        }
+    }
+
+    pub fn get_tray_culture() -> String {
+        TRAY_CULTURE.read().map(|g| g.clone()).unwrap_or_else(|_| "en-US".to_string())
     }
 
     pub struct TrayIcon {
@@ -256,6 +267,10 @@ pub mod win32 {
         unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
     }
 
+    fn to_wide(s: &str) -> Vec<u16> {
+        s.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
     unsafe fn show_tray_menu(hwnd: HWND) {
         unsafe {
             let hmenu = match CreatePopupMenu() {
@@ -263,15 +278,26 @@ pub mod win32 {
                 Err(_) => return,
             };
 
-            let _ = AppendMenuW(hmenu, MF_STRING, ID_TOGGLE_VISIBILITY, w!("Mostrar / Ocultar Barra"));
-            let _ = AppendMenuW(hmenu, MF_STRING, ID_SETTINGS, w!("Configurações..."));
-            let _ = AppendMenuW(hmenu, MF_STRING, ID_TOGGLE_SIDE, w!("Alternar Lado (Esq/Dir)"));
-            let _ = AppendMenuW(hmenu, MF_STRING, ID_CYCLE_SCREEN, w!("Alternar Monitor"));
-            let _ = AppendMenuW(hmenu, MF_STRING, ID_RELOAD_SENSORS, w!("Recarregar Sensores"));
+            let culture = get_tray_culture();
+            let s = crate::i18n::load_locale(if culture.is_empty() { "en-US" } else { &culture });
+
+            let w_toggle = to_wide(&s.tray_toggle);
+            let w_settings = to_wide(&s.tray_settings);
+            let w_side = to_wide(&s.tray_toggle_edge);
+            let w_screen = to_wide(&s.tray_cycle_monitor);
+            let w_reload = to_wide(&s.tray_reload_sensors);
+            let w_github = to_wide(&s.tray_github);
+            let w_exit = to_wide(&s.tray_exit);
+
+            let _ = AppendMenuW(hmenu, MF_STRING, ID_TOGGLE_VISIBILITY, windows::core::PCWSTR(w_toggle.as_ptr()));
+            let _ = AppendMenuW(hmenu, MF_STRING, ID_SETTINGS, windows::core::PCWSTR(w_settings.as_ptr()));
+            let _ = AppendMenuW(hmenu, MF_STRING, ID_TOGGLE_SIDE, windows::core::PCWSTR(w_side.as_ptr()));
+            let _ = AppendMenuW(hmenu, MF_STRING, ID_CYCLE_SCREEN, windows::core::PCWSTR(w_screen.as_ptr()));
+            let _ = AppendMenuW(hmenu, MF_STRING, ID_RELOAD_SENSORS, windows::core::PCWSTR(w_reload.as_ptr()));
             let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, None);
-            let _ = AppendMenuW(hmenu, MF_STRING, ID_GITHUB, w!("GitHub (Repositório)"));
+            let _ = AppendMenuW(hmenu, MF_STRING, ID_GITHUB, windows::core::PCWSTR(w_github.as_ptr()));
             let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, None);
-            let _ = AppendMenuW(hmenu, MF_STRING, ID_EXIT, w!("Sair do ZenithBar"));
+            let _ = AppendMenuW(hmenu, MF_STRING, ID_EXIT, windows::core::PCWSTR(w_exit.as_ptr()));
 
             let mut pt = POINT::default();
             let _ = GetCursorPos(&mut pt);
@@ -337,6 +363,7 @@ pub mod win32 {
     pub static SHOULD_UPDATE_POS: AtomicBool = AtomicBool::new(false);
 
     pub fn set_always_top_state(_always_top: bool) {}
+    pub fn set_tray_culture(_culture: &str) {}
 
     pub struct TrayIcon {}
 

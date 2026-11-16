@@ -282,6 +282,7 @@ fn apply_settings_to_app(
     ui.window().request_redraw();
 
     tray::win32::set_always_top_state(cfg.always_top);
+    tray::win32::set_tray_culture(&cfg.culture);
 
     // Atualiza o AppBar nativo Win32
     if let Some(ab_mgr) = ab.as_mut() {
@@ -440,6 +441,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let logical_h = if scale > 0.0 { target_monitor.work_height as f32 / scale } else { target_monitor.work_height as f32 };
         ui.set_sidebar_height_px(logical_h);
         tray::win32::set_always_top_state(config.borrow().always_top);
+        tray::win32::set_tray_culture(&config.borrow().culture);
 
         let cfg = config.borrow();
         let physical_w = if scale > 0.0 { (cfg.sidebar_width as f32 * scale).round() as i32 } else { cfg.sidebar_width as i32 };
@@ -531,7 +533,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let settings_weak_culture = settings_ui.as_weak();
     let ui_weak_culture = ui.as_weak();
     settings_ui.on_culture_changed(move |new_culture| {
-        let strings = i18n::load_locale(&new_culture);
+        let culture_str = new_culture.to_string();
+        tray::win32::set_tray_culture(&culture_str);
+        let strings = i18n::load_locale(&culture_str);
         if let Some(sw) = settings_weak_culture.upgrade() {
             apply_locale_to_settings(&sw, &strings);
         }

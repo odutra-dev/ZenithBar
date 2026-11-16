@@ -91,5 +91,12 @@
   "hotkey_reserve_desc": "Toggles space reservation for maximized windows",
   "btn_cancel": "Cancel",
   "btn_apply": "Apply",
-  "btn_save": "Save Changes"
+  "btn_save": "Save Changes",
+  "tray_toggle": "Show / Hide Sidebar",
+  "tray_settings": "Settings...",
+  "tray_toggle_edge": "Cycle Edge (Left/Right)",
+  "tray_cycle_monitor": "Cycle Monitor",
+  "tray_reload_sensors": "Reload Sensors",
+  "tray_github": "GitHub (Repository)",
+  "tray_exit": "Exit ZenithBar"
 }

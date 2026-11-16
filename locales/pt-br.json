@@ -91,5 +91,12 @@
   "hotkey_reserve_desc": "Alterna reserva de espaço para janelas maximizadas",
   "btn_cancel": "Cancelar",
   "btn_apply": "Aplicar",
-  "btn_save": "Salvar Alterações"
+  "btn_save": "Salvar Alterações",
+  "tray_toggle": "Mostrar / Ocultar Barra",
+  "tray_settings": "Configurações...",
+  "tray_toggle_edge": "Alternar Lado (Esq/Dir)",
+  "tray_cycle_monitor": "Alternar Monitor",
+  "tray_reload_sensors": "Recarregar Sensores",
+  "tray_github": "GitHub (Repositório)",
+  "tray_exit": "Sair do ZenithBar"
 }

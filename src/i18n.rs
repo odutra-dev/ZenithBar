@@ -115,6 +115,15 @@ pub struct I18nStrings {
     pub btn_cancel: String,
     pub btn_apply: String,
     pub btn_save: String,
+
+    // Tray Menu
+    pub tray_toggle: String,
+    pub tray_settings: String,
+    pub tray_toggle_edge: String,
+    pub tray_cycle_monitor: String,
+    pub tray_reload_sensors: String,
+    pub tray_github: String,
+    pub tray_exit: String,
 }
 
 impl Default for I18nStrings {
