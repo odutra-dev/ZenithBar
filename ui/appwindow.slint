@@ -146,6 +146,20 @@ export component AppWindow inherits Window {
     in-out property <bool> is_appbar: true;
     in-out property <bool> is_docked_right: true;
 
+    // Localized Strings
+    in-out property <string> i18n_cpu_title: "PROCESSOR (CPU)";
+    in-out property <string> i18n_ram_title: "MEMORY (RAM)";
+    in-out property <string> i18n_gpu_title: "GRAPHICS (GPU)";
+    in-out property <string> i18n_disks_title: "STORAGE";
+    in-out property <string> i18n_network_title: "NETWORK";
+    in-out property <string> i18n_clock: "Clock";
+    in-out property <string> i18n_temp: "Temp";
+    in-out property <string> i18n_usage_per_core: "Per-Core Usage:";
+    in-out property <string> i18n_fan: "Fan";
+    in-out property <string> i18n_local_ip: "Local";
+    in-out property <string> i18n_wan_ip: "WAN";
+    in-out property <string> i18n_hotkey_hint: "ZenithBar • Ctrl+Shift+S";
+
     // Telemetria modular e preferências visuais
     in-out property <bool> enable_cpu: true;
     in-out property <bool> show_cpu_cores: true;
@@ -315,7 +329,7 @@ export component AppWindow inherits Window {
 
                 // CPU Section with Per-Core Grid & Threshold Alert
                 if root.enable_cpu : MetricSection {
-                    title: "PROCESSADOR (CPU)";
+                    title: root.i18n_cpu_title;
                     icon_source: @image-url("../assets/icons/cpu.svg");
                     accent_color: #38bdf8;
                     alert_active: root.cpu_usage > 0.85 || root.cpu_temp_val > 80.0;
@@ -336,14 +350,14 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         spacing: 4px;
                         Text {
-                            text: root.sidebar_width_px < 220 ? root.cpu_clock_str : "Clock: " + root.cpu_clock_str;
+                            text: root.sidebar_width_px < 220 ? root.cpu_clock_str : root.i18n_clock + ": " + root.cpu_clock_str;
                             font-size: 9.5px;
                             color: #cbd5e1;
                             overflow: elide;
                             horizontal-stretch: 1;
                         }
                         Text {
-                            text: root.sidebar_width_px < 220 ? root.cpu_temp_str : "Temp: " + root.cpu_temp_str;
+                            text: root.sidebar_width_px < 220 ? root.cpu_temp_str : root.i18n_temp + ": " + root.cpu_temp_str;
                             font-size: 9.5px;
                             font-weight: 700;
                             color: root.cpu_temp_val > 80.0 ? #ef4444 : #f1f5f9;
@@ -355,7 +369,7 @@ export component AppWindow inherits Window {
                     if root.cpu_core_loads.length > 0 : VerticalLayout {
                         spacing: 3px;
                         Text {
-                            text: "Uso por Núcleo:";
+                            text: root.i18n_usage_per_core;
                             font-size: 9px;
                             color: #64748b;
                         }
@@ -387,7 +401,7 @@ export component AppWindow inherits Window {
 
                 // RAM Section with Threshold Alert
                 if root.enable_ram : MetricSection {
-                    title: "MEMÓRIA (RAM)";
+                    title: root.i18n_ram_title;
                     icon_source: @image-url("../assets/icons/ram.svg");
                     accent_color: #a855f7;
                     alert_active: root.ram_percent > 0.90;
@@ -423,7 +437,7 @@ export component AppWindow inherits Window {
 
                 // GPU Section with Threshold Alert
                 if (root.gpu_detected && root.enable_gpu) : MetricSection {
-                    title: "PLACA DE VÍDEO (GPU)";
+                    title: root.i18n_gpu_title;
                     icon_source: @image-url("../assets/icons/gpu.svg");
                     accent_color: #10b981;
                     alert_active: root.gpu_usage > 0.85 || root.gpu_temp_val > 80.0;
@@ -451,7 +465,7 @@ export component AppWindow inherits Window {
                             horizontal-stretch: 1;
                         }
                         Text {
-                            text: root.sidebar_width_px < 220 ? root.gpu_temp_str : "Temp: " + root.gpu_temp_str;
+                            text: root.sidebar_width_px < 220 ? root.gpu_temp_str : root.i18n_temp + ": " + root.gpu_temp_str;
                             font-size: 9.5px;
                             font-weight: 700;
                             color: root.gpu_temp_val > 80.0 ? #ef4444 : #f1f5f9;
@@ -460,7 +474,7 @@ export component AppWindow inherits Window {
                     }
 
                     if root.gpu_fan_str != "" : Text {
-                        text: "Fan: " + root.gpu_fan_str;
+                        text: root.i18n_fan + ": " + root.gpu_fan_str;
                         font-size: 9.5px;
                         color: #94a3b8;
                         overflow: elide;
@@ -474,7 +488,7 @@ export component AppWindow inherits Window {
 
                 // Storage Section (Supports Multi-Disk List or Primary View)
                 if root.enable_disks : MetricSection {
-                    title: "ARMAZENAMENTO";
+                    title: root.i18n_disks_title;
                     icon_source: @image-url("../assets/icons/disk.svg");
                     accent_color: #f59e0b;
                     badge: root.disk_primary_name;
@@ -559,7 +573,7 @@ export component AppWindow inherits Window {
 
                 // Network Section (Shows Local IP and External WAN IP)
                 if root.enable_network : MetricSection {
-                    title: "REDE";
+                    title: root.i18n_network_title;
                     icon_source: @image-url("../assets/icons/network.svg");
                     accent_color: #f43f5e;
                     badge: root.net_download_str;
@@ -592,14 +606,14 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         spacing: 4px;
                         Text {
-                            text: root.sidebar_width_px < 220 ? root.net_ip_str : "Local: " + root.net_ip_str;
+                            text: root.sidebar_width_px < 220 ? root.net_ip_str : root.i18n_local_ip + ": " + root.net_ip_str;
                             font-size: 9px;
                             color: #64748b;
                             overflow: elide;
                             horizontal-stretch: 1;
                         }
                         if root.sidebar_width_px >= 220 : Text {
-                            text: "WAN: " + root.net_ext_ip_str;
+                            text: root.i18n_wan_ip + ": " + root.net_ext_ip_str;
                             font-size: 9px;
                             color: #38bdf8;
                             overflow: elide;
@@ -644,7 +658,7 @@ export component AppWindow inherits Window {
                         background: #10b981;
                     }
                     Text {
-                        text: "ZenithBar • Ctrl+Shift+S";
+                        text: root.i18n_hotkey_hint;
                         font-size: 8px;
                         color: #64748b;
                         vertical-alignment: center;

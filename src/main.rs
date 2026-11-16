@@ -3,6 +3,7 @@
 mod appbar;
 mod config;
 mod dwm;
+mod i18n;
 mod monitor;
 mod telemetry;
 mod tray;
@@ -52,7 +53,115 @@ fn appbar_show(#[allow(unused_variables)] ui: &AppWindow, ab: &mut Option<AppBar
     log_msg("Barra reexibida na tela (AppBar registrado).");
 }
 
+fn apply_locale_to_app(ui: &AppWindow, s: &i18n::I18nStrings) {
+    ui.set_i18n_cpu_title(s.cpu_title.clone().into());
+    ui.set_i18n_ram_title(s.ram_title.clone().into());
+    ui.set_i18n_gpu_title(s.gpu_title.clone().into());
+    ui.set_i18n_disks_title(s.disks_title.clone().into());
+    ui.set_i18n_network_title(s.network_title.clone().into());
+    ui.set_i18n_clock(s.clock.clone().into());
+    ui.set_i18n_temp(s.temp.clone().into());
+    ui.set_i18n_usage_per_core(s.usage_per_core.clone().into());
+    ui.set_i18n_fan(s.fan.clone().into());
+    ui.set_i18n_local_ip(s.local_ip.clone().into());
+    ui.set_i18n_wan_ip(s.wan_ip.clone().into());
+    ui.set_i18n_hotkey_hint(s.hotkey_hint.clone().into());
+}
+
+fn apply_locale_to_settings(sw: &SettingsWindow, s: &i18n::I18nStrings) {
+    sw.set_i18n_window_title(s.window_title.clone().into());
+    sw.set_i18n_header_title(s.header_title.clone().into());
+    sw.set_i18n_header_desc(s.header_desc.clone().into());
+    sw.set_i18n_tab_general(s.tab_general.clone().into());
+    sw.set_i18n_tab_advanced(s.tab_advanced.clone().into());
+    sw.set_i18n_tab_style(s.tab_style.clone().into());
+    sw.set_i18n_tab_monitors(s.tab_monitors.clone().into());
+    sw.set_i18n_tab_hotkeys(s.tab_hotkeys.clone().into());
+
+    sw.set_i18n_language_label(s.language_label.clone().into());
+    sw.set_i18n_language_desc(s.language_desc.clone().into());
+    sw.set_i18n_dock_label(s.dock_label.clone().into());
+    sw.set_i18n_dock_desc(s.dock_desc.clone().into());
+    sw.set_i18n_dock_left(s.dock_left.clone().into());
+    sw.set_i18n_dock_right(s.dock_right.clone().into());
+    sw.set_i18n_monitor_label(s.monitor_label.clone().into());
+    sw.set_i18n_monitor_desc(s.monitor_desc.clone().into());
+    sw.set_i18n_monitor_primary(s.monitor_primary.clone().into());
+    sw.set_i18n_monitor_2(s.monitor_2.clone().into());
+    sw.set_i18n_monitor_3(s.monitor_3.clone().into());
+    sw.set_i18n_appbar_label(s.appbar_label.clone().into());
+    sw.set_i18n_appbar_desc(s.appbar_desc.clone().into());
+    sw.set_i18n_always_top_label(s.always_top_label.clone().into());
+    sw.set_i18n_always_top_desc(s.always_top_desc.clone().into());
+    sw.set_i18n_startup_label(s.startup_label.clone().into());
+    sw.set_i18n_startup_desc(s.startup_desc.clone().into());
+    sw.set_i18n_initially_hidden_label(s.initially_hidden_label.clone().into());
+    sw.set_i18n_initially_hidden_desc(s.initially_hidden_desc.clone().into());
+
+    sw.set_i18n_polling_label(s.polling_label.clone().into());
+    sw.set_i18n_polling_desc(s.polling_desc.clone().into());
+    sw.set_i18n_tray_icon_label(s.tray_icon_label.clone().into());
+    sw.set_i18n_tray_icon_desc(s.tray_icon_desc.clone().into());
+    sw.set_i18n_click_through_label(s.click_through_label.clone().into());
+    sw.set_i18n_click_through_desc(s.click_through_desc.clone().into());
+    sw.set_i18n_collapse_menu_label(s.collapse_menu_label.clone().into());
+    sw.set_i18n_collapse_menu_desc(s.collapse_menu_desc.clone().into());
+    sw.set_i18n_auto_update_label(s.auto_update_label.clone().into());
+    sw.set_i18n_auto_update_desc(s.auto_update_desc.clone().into());
+
+    sw.set_i18n_sidebar_width_label(s.sidebar_width_label.clone().into());
+    sw.set_i18n_sidebar_width_desc(s.sidebar_width_desc.clone().into());
+    sw.set_i18n_bg_opacity_label(s.bg_opacity_label.clone().into());
+    sw.set_i18n_bg_opacity_desc(s.bg_opacity_desc.clone().into());
+    sw.set_i18n_text_align_label(s.text_align_label.clone().into());
+    sw.set_i18n_text_align_desc(s.text_align_desc.clone().into());
+    sw.set_i18n_align_left(s.align_left.clone().into());
+    sw.set_i18n_align_right(s.align_right.clone().into());
+    sw.set_i18n_show_hostname_label(s.show_hostname_label.clone().into());
+    sw.set_i18n_show_hostname_desc(s.show_hostname_desc.clone().into());
+    sw.set_i18n_show_clock_label(s.show_clock_label.clone().into());
+    sw.set_i18n_show_clock_desc(s.show_clock_desc.clone().into());
+    sw.set_i18n_clock_24hr_label(s.clock_24hr_label.clone().into());
+    sw.set_i18n_clock_24hr_desc(s.clock_24hr_desc.clone().into());
+    sw.set_i18n_alert_blink_label(s.alert_blink_label.clone().into());
+    sw.set_i18n_alert_blink_desc(s.alert_blink_desc.clone().into());
+
+    sw.set_i18n_enable_cpu_label(s.enable_cpu_label.clone().into());
+    sw.set_i18n_enable_cpu_desc(s.enable_cpu_desc.clone().into());
+    sw.set_i18n_show_cores_label(s.show_cores_label.clone().into());
+    sw.set_i18n_show_cores_desc(s.show_cores_desc.clone().into());
+    sw.set_i18n_enable_ram_label(s.enable_ram_label.clone().into());
+    sw.set_i18n_enable_ram_desc(s.enable_ram_desc.clone().into());
+    sw.set_i18n_enable_gpu_label(s.enable_gpu_label.clone().into());
+    sw.set_i18n_enable_gpu_desc(s.enable_gpu_desc.clone().into());
+    sw.set_i18n_enable_disks_label(s.enable_disks_label.clone().into());
+    sw.set_i18n_enable_disks_desc(s.enable_disks_desc.clone().into());
+    sw.set_i18n_show_all_disks_label(s.show_all_disks_label.clone().into());
+    sw.set_i18n_show_all_disks_desc(s.show_all_disks_desc.clone().into());
+    sw.set_i18n_enable_network_label(s.enable_network_label.clone().into());
+    sw.set_i18n_enable_network_desc(s.enable_network_desc.clone().into());
+    sw.set_i18n_show_sparklines_label(s.show_sparklines_label.clone().into());
+    sw.set_i18n_show_sparklines_desc(s.show_sparklines_desc.clone().into());
+
+    sw.set_i18n_hotkey_toggle_label(s.hotkey_toggle_label.clone().into());
+    sw.set_i18n_hotkey_toggle_desc(s.hotkey_toggle_desc.clone().into());
+    sw.set_i18n_hotkey_edge_label(s.hotkey_edge_label.clone().into());
+    sw.set_i18n_hotkey_edge_desc(s.hotkey_edge_desc.clone().into());
+    sw.set_i18n_hotkey_screen_label(s.hotkey_screen_label.clone().into());
+    sw.set_i18n_hotkey_screen_desc(s.hotkey_screen_desc.clone().into());
+    sw.set_i18n_hotkey_reserve_label(s.hotkey_reserve_label.clone().into());
+    sw.set_i18n_hotkey_reserve_desc(s.hotkey_reserve_desc.clone().into());
+
+    sw.set_i18n_btn_cancel(s.btn_cancel.clone().into());
+    sw.set_i18n_btn_apply(s.btn_apply.clone().into());
+    sw.set_i18n_btn_save(s.btn_save.clone().into());
+}
+
 fn populate_settings_ui(sw: &SettingsWindow, cfg: &AppConfig, monitor_count: usize) {
+    sw.set_culture(cfg.culture.clone().into());
+    let strings = i18n::load_locale(&cfg.culture);
+    apply_locale_to_settings(sw, &strings);
+
     sw.set_dock_right(cfg.is_dock_right());
     sw.set_monitor_idx(cfg.screen_index as i32);
     sw.set_monitor_count(monitor_count as i32);
@@ -137,6 +246,11 @@ fn apply_settings_to_app(
     cfg.show_all_disks = sw.get_show_all_disks();
     cfg.enable_network = sw.get_enable_network();
     cfg.show_sparklines = sw.get_show_sparklines();
+
+    cfg.culture = sw.get_culture().to_string();
+    let strings = i18n::load_locale(&cfg.culture);
+    apply_locale_to_app(ui, &strings);
+    apply_locale_to_settings(sw, &strings);
 
     let _ = cfg.save();
 
@@ -260,6 +374,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Propriedades iniciais da UI Principal
     {
         let cfg = config.borrow();
+        let init_strings = i18n::load_locale(&cfg.culture);
+        apply_locale_to_app(&ui, &init_strings);
+        apply_locale_to_settings(&settings_ui, &init_strings);
+        settings_ui.set_culture(cfg.culture.clone().into());
+
         ui.set_is_docked_right(cfg.is_dock_right());
         ui.set_is_appbar(cfg.use_app_bar);
         ui.set_enable_cpu(cfg.enable_cpu);
@@ -406,6 +525,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     settings_ui.on_request_close(move || {
         if let Some(sw) = settings_weak_close.upgrade() {
             let _ = sw.hide();
+        }
+    });
+
+    let settings_weak_culture = settings_ui.as_weak();
+    let ui_weak_culture = ui.as_weak();
+    settings_ui.on_culture_changed(move |new_culture| {
+        let strings = i18n::load_locale(&new_culture);
+        if let Some(sw) = settings_weak_culture.upgrade() {
+            apply_locale_to_settings(&sw, &strings);
+        }
+        if let Some(ui) = ui_weak_culture.upgrade() {
+            apply_locale_to_app(&ui, &strings);
         }
     });
 

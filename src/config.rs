@@ -139,7 +139,7 @@ pub struct AppConfig {
 
 fn default_dock_edge() -> String { "Right".to_string() }
 fn default_screen_index() -> usize { 0 }
-fn default_culture() -> String { "pt-BR".to_string() }
+fn default_culture() -> String { "en-US".to_string() }
 fn default_true() -> bool { true }
 fn default_false() -> bool { false }
 fn default_zero_i32() -> i32 { 0 }

@@ -82,7 +82,7 @@ component TabButton inherits Rectangle {
 }
 
 export component SettingsWindow inherits Window {
-    title: "ZenithBar - Configurações";
+    title: root.i18n_window_title;
     icon: @image-url("../assets/icon.png");
     width: 540px;
     height: 620px;
@@ -95,9 +95,105 @@ export component SettingsWindow inherits Window {
     callback request_close();
     callback request_move_module_up(string);
     callback request_move_module_down(string);
+    callback culture_changed(string);
 
     // Estado da Aba Ativa: 0=Geral, 1=Avançado, 2=Estilo, 3=Monitores, 4=Atalhos
     in-out property <int> current_tab: 0;
+
+    // Idioma e Textos Localizados
+    in-out property <string> culture: "en-US";
+    in-out property <string> i18n_window_title: "ZenithBar - Settings";
+    in-out property <string> i18n_header_title: "ZenithBar Settings";
+    in-out property <string> i18n_header_desc: "Customize dock, monitored hardware and bar style";
+    in-out property <string> i18n_tab_general: "General";
+    in-out property <string> i18n_tab_advanced: "Advanced";
+    in-out property <string> i18n_tab_style: "Style";
+    in-out property <string> i18n_tab_monitors: "Hardware";
+    in-out property <string> i18n_tab_hotkeys: "Hotkeys";
+
+    // Tab General
+    in-out property <string> i18n_language_label: "Interface Language";
+    in-out property <string> i18n_language_desc: "Select the display language for the application";
+    in-out property <string> i18n_dock_label: "Screen Placement";
+    in-out property <string> i18n_dock_desc: "Monitor edge where the panel docks";
+    in-out property <string> i18n_dock_left: "Left";
+    in-out property <string> i18n_dock_right: "Right";
+    in-out property <string> i18n_monitor_label: "Display Monitor";
+    in-out property <string> i18n_monitor_desc: "Choose which screen displays the diagnostic sidebar";
+    in-out property <string> i18n_monitor_primary: "Monitor 1 (Primary)";
+    in-out property <string> i18n_monitor_2: "Monitor 2";
+    in-out property <string> i18n_monitor_3: "Monitor 3";
+    in-out property <string> i18n_appbar_label: "Reserve Desktop Space (AppBar)";
+    in-out property <string> i18n_appbar_desc: "Pushes maximized windows so they do not overlap the sidebar";
+    in-out property <string> i18n_always_top_label: "Always on Top";
+    in-out property <string> i18n_always_top_desc: "Keep sidebar visible above normal windows";
+    in-out property <string> i18n_startup_label: "Start with Windows";
+    in-out property <string> i18n_startup_desc: "Run ZenithBar automatically when computer boots";
+    in-out property <string> i18n_initially_hidden_label: "Start Hidden";
+    in-out property <string> i18n_initially_hidden_desc: "Starts minimized directly to system tray";
+
+    // Tab Advanced
+    in-out property <string> i18n_polling_label: "Sensor Refresh Rate";
+    in-out property <string> i18n_polling_desc: "Telemetry sampling interval";
+    in-out property <string> i18n_tray_icon_label: "System Tray Icon";
+    in-out property <string> i18n_tray_icon_desc: "Shows icon next to Windows clock with quick menu";
+    in-out property <string> i18n_click_through_label: "Transparent Clicks (Click-Through)";
+    in-out property <string> i18n_click_through_desc: "Allows clicking through the bar to items behind it";
+    in-out property <string> i18n_collapse_menu_label: "Collapse Header Action Buttons";
+    in-out property <string> i18n_collapse_menu_desc: "Hides settings and dock buttons for minimal look";
+    in-out property <string> i18n_auto_update_label: "Automatic Update Check";
+    in-out property <string> i18n_auto_update_desc: "Periodically checks for new ZenithBar versions";
+
+    // Tab Style
+    in-out property <string> i18n_sidebar_width_label: "Sidebar Width";
+    in-out property <string> i18n_sidebar_width_desc: "Custom width from 180px to 360px reserved on screen";
+    in-out property <string> i18n_bg_opacity_label: "Acrylic Background Opacity";
+    in-out property <string> i18n_bg_opacity_desc: "Intensity of Fluent translucent glass effect";
+    in-out property <string> i18n_text_align_label: "Text Alignment";
+    in-out property <string> i18n_text_align_desc: "Orientation of texts and metrics in cards";
+    in-out property <string> i18n_align_left: "Left";
+    in-out property <string> i18n_align_right: "Right";
+    in-out property <string> i18n_show_hostname_label: "Show Computer Name (Hostname)";
+    in-out property <string> i18n_show_hostname_desc: "Shows machine name in top card";
+    in-out property <string> i18n_show_clock_label: "Show Clock and Date";
+    in-out property <string> i18n_show_clock_desc: "Shows time and date at top of sidebar";
+    in-out property <string> i18n_clock_24hr_label: "24-Hour Time Format";
+    in-out property <string> i18n_clock_24hr_desc: "Uncheck to show 12h format (AM/PM)";
+    in-out property <string> i18n_alert_blink_label: "Highlighted Visual Alerts";
+    in-out property <string> i18n_alert_blink_desc: "Highlights in red when temp > 80°C and load > 85%";
+
+    // Tab Hardware
+    in-out property <string> i18n_enable_cpu_label: "CPU Module";
+    in-out property <string> i18n_enable_cpu_desc: "Load %, clock, temperature and history";
+    in-out property <string> i18n_show_cores_label: "  └ Per-Core Micro-Bars Grid";
+    in-out property <string> i18n_show_cores_desc: "Displays micro-bar for each physical/logical core";
+    in-out property <string> i18n_enable_ram_label: "RAM Module";
+    in-out property <string> i18n_enable_ram_desc: "Used GB, system total and percent occupied";
+    in-out property <string> i18n_enable_gpu_label: "GPU Module";
+    in-out property <string> i18n_enable_gpu_desc: "3D load, GPU temperature, VRAM and fan RPM";
+    in-out property <string> i18n_enable_disks_label: "Storage Module (Drives)";
+    in-out property <string> i18n_enable_disks_desc: "Disk space and read/write speeds in real time";
+    in-out property <string> i18n_show_all_disks_label: "  └ List All Connected Drives";
+    in-out property <string> i18n_show_all_disks_desc: "Show all logical volumes (C:, D:, ...) or primary only";
+    in-out property <string> i18n_enable_network_label: "Network Module (Ethernet / Wi-Fi)";
+    in-out property <string> i18n_enable_network_desc: "Download/Upload speeds, Local IP and WAN IP";
+    in-out property <string> i18n_show_sparklines_label: "Real-Time History Graphs";
+    in-out property <string> i18n_show_sparklines_desc: "Show continuous Sparkline trend curves on modules";
+
+    // Tab Hotkeys
+    in-out property <string> i18n_hotkey_toggle_label: "Show / Hide Sidebar";
+    in-out property <string> i18n_hotkey_toggle_desc: "Global hotkey to toggle panel visibility";
+    in-out property <string> i18n_hotkey_edge_label: "Cycle Screen Edge";
+    in-out property <string> i18n_hotkey_edge_desc: "Instantly moves sidebar between Left and Right";
+    in-out property <string> i18n_hotkey_screen_label: "Cycle Active Monitor";
+    in-out property <string> i18n_hotkey_screen_desc: "Moves sidebar to next connected display";
+    in-out property <string> i18n_hotkey_reserve_label: "Toggle Space Reservation (AppBar)";
+    in-out property <string> i18n_hotkey_reserve_desc: "Toggles space reservation for maximized windows";
+
+    // Buttons
+    in-out property <string> i18n_btn_cancel: "Cancel";
+    in-out property <string> i18n_btn_apply: "Apply";
+    in-out property <string> i18n_btn_save: "Save Changes";
 
     // Aba Geral
     in-out property <bool> dock_right: true;
@@ -162,13 +258,13 @@ export component SettingsWindow inherits Window {
                 VerticalLayout {
                     spacing: 2px;
                     Text {
-                        text: "Configurações do ZenithBar";
+                        text: root.i18n_header_title;
                         font-size: 18px;
                         font-weight: 800;
                         color: #ffffff;
                     }
                     Text {
-                        text: "Personalize a ancoragem, hardware monitorado e estilo da barra";
+                        text: root.i18n_header_desc;
                         font-size: 11px;
                         color: #64748b;
                     }
@@ -181,31 +277,31 @@ export component SettingsWindow inherits Window {
             spacing: 6px;
 
             TabButton {
-                title: "Geral";
+                title: root.i18n_tab_general;
                 icon_source: @image-url("../assets/icons/settings.svg");
                 active: root.current_tab == 0;
                 clicked => { root.current_tab = 0; }
             }
             TabButton {
-                title: "Avançado";
+                title: root.i18n_tab_advanced;
                 icon_source: @image-url("../assets/icons/cpu.svg");
                 active: root.current_tab == 1;
                 clicked => { root.current_tab = 1; }
             }
             TabButton {
-                title: "Estilo";
+                title: root.i18n_tab_style;
                 icon_source: @image-url("../assets/icons/dock.svg");
                 active: root.current_tab == 2;
                 clicked => { root.current_tab = 2; }
             }
             TabButton {
-                title: "Monitores";
+                title: root.i18n_tab_monitors;
                 icon_source: @image-url("../assets/icons/gpu.svg");
                 active: root.current_tab == 3;
                 clicked => { root.current_tab = 3; }
             }
             TabButton {
-                title: "Atalhos";
+                title: root.i18n_tab_hotkeys;
                 icon_source: @image-url("../assets/icons/network.svg");
                 active: root.current_tab == 4;
                 clicked => { root.current_tab = 4; }
@@ -230,18 +326,43 @@ export component SettingsWindow inherits Window {
                     spacing: 8px;
 
                     SettingItem {
-                        label: "Posicionamento na Tela";
-                        description: "Borda do monitor onde o painel fica acoplado";
+                        label: root.i18n_language_label;
+                        description: root.i18n_language_desc;
                         HorizontalLayout {
                             spacing: 8px;
                             alignment: center;
                             Button {
-                                text: !root.dock_right ? "✔ Esquerda" : "Esquerda";
+                                text: (root.culture == "en-US" || root.culture == "en-us" || root.culture == "en") ? "✔ English" : "English";
+                                primary: (root.culture == "en-US" || root.culture == "en-us" || root.culture == "en");
+                                clicked => {
+                                    root.culture = "en-US";
+                                    root.culture_changed("en-US");
+                                }
+                            }
+                            Button {
+                                text: (root.culture == "pt-BR" || root.culture == "pt-br" || root.culture == "pt") ? "✔ Português" : "Português";
+                                primary: (root.culture == "pt-BR" || root.culture == "pt-br" || root.culture == "pt");
+                                clicked => {
+                                    root.culture = "pt-BR";
+                                    root.culture_changed("pt-BR");
+                                }
+                            }
+                        }
+                    }
+
+                    SettingItem {
+                        label: root.i18n_dock_label;
+                        description: root.i18n_dock_desc;
+                        HorizontalLayout {
+                            spacing: 8px;
+                            alignment: center;
+                            Button {
+                                text: !root.dock_right ? "✔ " + root.i18n_dock_left : root.i18n_dock_left;
                                 primary: !root.dock_right;
                                 clicked => { root.dock_right = false; }
                             }
                             Button {
-                                text: root.dock_right ? "✔ Direita" : "Direita";
+                                text: root.dock_right ? "✔ " + root.i18n_dock_right : root.i18n_dock_right;
                                 primary: root.dock_right;
                                 clicked => { root.dock_right = true; }
                             }
@@ -249,23 +370,23 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Monitor de Exibição";
-                        description: "Escolha qual tela exibirá a barra de diagnóstico";
+                        label: root.i18n_monitor_label;
+                        description: root.i18n_monitor_desc;
                         HorizontalLayout {
                             spacing: 8px;
                             alignment: center;
                             Button {
-                                text: root.monitor_idx == 0 ? "✔ Monitor 1 (Principal)" : "Monitor 1";
+                                text: root.monitor_idx == 0 ? "✔ " + root.i18n_monitor_primary : root.i18n_monitor_primary;
                                 primary: root.monitor_idx == 0;
                                 clicked => { root.monitor_idx = 0; }
                             }
                             if root.monitor_count > 1 : Button {
-                                text: root.monitor_idx == 1 ? "✔ Monitor 2" : "Monitor 2";
+                                text: root.monitor_idx == 1 ? "✔ " + root.i18n_monitor_2 : root.i18n_monitor_2;
                                 primary: root.monitor_idx == 1;
                                 clicked => { root.monitor_idx = 1; }
                             }
                             if root.monitor_count > 2 : Button {
-                                text: root.monitor_idx == 2 ? "✔ Monitor 3" : "Monitor 3";
+                                text: root.monitor_idx == 2 ? "✔ " + root.i18n_monitor_3 : root.i18n_monitor_3;
                                 primary: root.monitor_idx == 2;
                                 clicked => { root.monitor_idx = 2; }
                             }
@@ -273,8 +394,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Reservar Espaço no Desktop (AppBar)";
-                        description: "Empurra janelas maximizadas para não cobrirem a barra";
+                        label: root.i18n_appbar_label;
+                        description: root.i18n_appbar_desc;
                         CheckBox {
                             checked: root.use_app_bar;
                             toggled => { root.use_app_bar = self.checked; }
@@ -282,8 +403,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Sempre no Topo (Always on Top)";
-                        description: "Mantém o painel visível sobre outras janelas normais";
+                        label: root.i18n_always_top_label;
+                        description: root.i18n_always_top_desc;
                         CheckBox {
                             checked: root.always_top;
                             toggled => { root.always_top = self.checked; }
@@ -291,8 +412,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Iniciar com o Windows";
-                        description: "Executa o ZenithBar automaticamente ao ligar o computador";
+                        label: root.i18n_startup_label;
+                        description: root.i18n_startup_desc;
                         CheckBox {
                             checked: root.run_at_startup;
                             toggled => { root.run_at_startup = self.checked; }
@@ -300,8 +421,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Iniciar Oculto";
-                        description: "Inicia minimizado direto na bandeja do sistema";
+                        label: root.i18n_initially_hidden_label;
+                        description: root.i18n_initially_hidden_desc;
                         CheckBox {
                             checked: root.initially_hidden;
                             toggled => { root.initially_hidden = self.checked; }
@@ -314,8 +435,8 @@ export component SettingsWindow inherits Window {
                     spacing: 8px;
 
                     SettingItem {
-                        label: "Frequência de Atualização dos Sensores";
-                        description: "Intervalo de coleta de telemetria";
+                        label: root.i18n_polling_label;
+                        description: root.i18n_polling_desc;
                         HorizontalLayout {
                             spacing: 6px;
                             alignment: center;
@@ -343,8 +464,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Ícone na Bandeja do Sistema (Tray)";
-                        description: "Exibe o ícone ao lado do relógio do Windows com menu rápido";
+                        label: root.i18n_tray_icon_label;
+                        description: root.i18n_tray_icon_desc;
                         CheckBox {
                             checked: root.show_tray_icon;
                             toggled => { root.show_tray_icon = self.checked; }
@@ -352,8 +473,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Cliques Transparentes (Click-Through)";
-                        description: "Permite clicar através da barra nos itens atrás dela";
+                        label: root.i18n_click_through_label;
+                        description: root.i18n_click_through_desc;
                         CheckBox {
                             checked: root.click_through;
                             toggled => { root.click_through = self.checked; }
@@ -361,8 +482,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Recolher Botões de Ação do Cabeçalho";
-                        description: "Oculta botões ⚙ e ⇥ da barra para visual 100% minimalista";
+                        label: root.i18n_collapse_menu_label;
+                        description: root.i18n_collapse_menu_desc;
                         CheckBox {
                             checked: root.collapse_menu_bar;
                             toggled => { root.collapse_menu_bar = self.checked; }
@@ -370,8 +491,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Verificação Automática de Atualizações";
-                        description: "Checa periodicamente se há novas versões do ZenithBar";
+                        label: root.i18n_auto_update_label;
+                        description: root.i18n_auto_update_desc;
                         CheckBox {
                             checked: root.auto_update;
                             toggled => { root.auto_update = self.checked; }
@@ -384,8 +505,8 @@ export component SettingsWindow inherits Window {
                     spacing: 8px;
 
                     SettingItem {
-                        label: "Largura da Barra Lateral";
-                        description: "Largura personalizável de 180px a 360px reservada na tela";
+                        label: root.i18n_sidebar_width_label;
+                        description: root.i18n_sidebar_width_desc;
                         HorizontalLayout {
                             spacing: 8px;
                             alignment: center;
@@ -420,8 +541,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Opacidade do Fundo Acrílico";
-                        description: "Intensidade do efeito de vidro translúcido Fluent";
+                        label: root.i18n_bg_opacity_label;
+                        description: root.i18n_bg_opacity_desc;
                         HorizontalLayout {
                             spacing: 6px;
                             alignment: center;
@@ -444,18 +565,18 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Alinhamento do Texto";
-                        description: "Orientação dos textos e métricas nos cartões";
+                        label: root.i18n_text_align_label;
+                        description: root.i18n_text_align_desc;
                         HorizontalLayout {
                             spacing: 8px;
                             alignment: center;
                             Button {
-                                text: !root.text_align_right ? "✔ Esquerda" : "Esquerda";
+                                text: !root.text_align_right ? "✔ " + root.i18n_align_left : root.i18n_align_left;
                                 primary: !root.text_align_right;
                                 clicked => { root.text_align_right = false; }
                             }
                             Button {
-                                text: root.text_align_right ? "✔ Direita" : "Direita";
+                                text: root.text_align_right ? "✔ " + root.i18n_align_right : root.i18n_align_right;
                                 primary: root.text_align_right;
                                 clicked => { root.text_align_right = true; }
                             }
@@ -463,8 +584,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Exibir Nome do Computador (Hostname)";
-                        description: "Exibe o nome da máquina no cartão superior";
+                        label: root.i18n_show_hostname_label;
+                        description: root.i18n_show_hostname_desc;
                         CheckBox {
                             checked: root.show_machine_name;
                             toggled => { root.show_machine_name = self.checked; }
@@ -472,8 +593,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Exibir Relógio e Data";
-                        description: "Exibe horário e data no topo da barra lateral";
+                        label: root.i18n_show_clock_label;
+                        description: root.i18n_show_clock_desc;
                         CheckBox {
                             checked: root.show_clock;
                             toggled => { root.show_clock = self.checked; }
@@ -481,8 +602,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Formato de Horário 24 Horas";
-                        description: "Desmarque para exibir no formato 12h (AM/PM)";
+                        label: root.i18n_clock_24hr_label;
+                        description: root.i18n_clock_24hr_desc;
                         CheckBox {
                             checked: root.clock_24hr;
                             toggled => { root.clock_24hr = self.checked; }
@@ -490,8 +611,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Alertas Visuais em Destaque";
-                        description: "Realça em vermelho temperaturas > 80°C e carga > 85%";
+                        label: root.i18n_alert_blink_label;
+                        description: root.i18n_alert_blink_desc;
                         CheckBox {
                             checked: root.alert_blink;
                             toggled => { root.alert_blink = self.checked; }
@@ -504,8 +625,8 @@ export component SettingsWindow inherits Window {
                     spacing: 8px;
 
                     SettingItem {
-                        label: "Módulo do Processador (CPU)";
-                        description: "Monitoramento de uso total, clock e temperaturas";
+                        label: root.i18n_enable_cpu_label;
+                        description: root.i18n_enable_cpu_desc;
                         CheckBox {
                             checked: root.enable_cpu;
                             toggled => { root.enable_cpu = self.checked; }
@@ -513,8 +634,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "  └ Grade de Micro-Barras por Núcleo";
-                        description: "Exibe uma micro-barra colorida para cada núcleo físico/lógico";
+                        label: root.i18n_show_cores_label;
+                        description: root.i18n_show_cores_desc;
                         CheckBox {
                             checked: root.show_cpu_cores;
                             toggled => { root.show_cpu_cores = self.checked; }
@@ -522,8 +643,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Módulo de Memória RAM";
-                        description: "Uso em GB, total do sistema e percentual ocupado";
+                        label: root.i18n_enable_ram_label;
+                        description: root.i18n_enable_ram_desc;
                         CheckBox {
                             checked: root.enable_ram;
                             toggled => { root.enable_ram = self.checked; }
@@ -531,8 +652,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Módulo da Placa de Vídeo (GPU)";
-                        description: "Carga 3D, temperatura da GPU, VRAM e fan RPM";
+                        label: root.i18n_enable_gpu_label;
+                        description: root.i18n_enable_gpu_desc;
                         CheckBox {
                             checked: root.enable_gpu;
                             toggled => { root.enable_gpu = self.checked; }
@@ -540,8 +661,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Módulo de Armazenamento (Discos)";
-                        description: "Espaço em disco e taxas de leitura/escrita em tempo real";
+                        label: root.i18n_enable_disks_label;
+                        description: root.i18n_enable_disks_desc;
                         CheckBox {
                             checked: root.enable_disks;
                             toggled => { root.enable_disks = self.checked; }
@@ -549,8 +670,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "  └ Listar Todas as Unidades Conectadas";
-                        description: "Exibe todos os volumes lógicos (C:, D:, E:...) ou apenas o principal";
+                        label: root.i18n_show_all_disks_label;
+                        description: root.i18n_show_all_disks_desc;
                         CheckBox {
                             checked: root.show_all_disks;
                             toggled => { root.show_all_disks = self.checked; }
@@ -558,8 +679,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Módulo de Rede (Ethernet / Wi-Fi)";
-                        description: "Velocidades de Download/Upload, IP Local e IP WAN";
+                        label: root.i18n_enable_network_label;
+                        description: root.i18n_enable_network_desc;
                         CheckBox {
                             checked: root.enable_network;
                             toggled => { root.enable_network = self.checked; }
@@ -567,8 +688,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Gráficos de Histórico em Tempo Real";
-                        description: "Exibe curvas de tendência Sparklines contínuas nos módulos";
+                        label: root.i18n_show_sparklines_label;
+                        description: root.i18n_show_sparklines_desc;
                         CheckBox {
                             checked: root.show_sparklines;
                             toggled => { root.show_sparklines = self.checked; }
@@ -581,8 +702,8 @@ export component SettingsWindow inherits Window {
                     spacing: 8px;
 
                     SettingItem {
-                        label: "Alternar Visibilidade da Barra (Toggle)";
-                        description: "Oculta ou reexibe a barra em qualquer aplicativo ou jogo";
+                        label: root.i18n_hotkey_toggle_label;
+                        description: root.i18n_hotkey_toggle_desc;
                         HorizontalLayout {
                             alignment: center;
                             spacing: 8px;
@@ -608,8 +729,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Alternar Lado da Tela (Cycle Edge)";
-                        description: "Transfere instantaneamente a barra entre Esquerda e Direita";
+                        label: root.i18n_hotkey_edge_label;
+                        description: root.i18n_hotkey_edge_desc;
                         HorizontalLayout {
                             alignment: center;
                             spacing: 8px;
@@ -635,8 +756,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Alternar Monitor Ativo (Cycle Screen)";
-                        description: "Move a barra para o próximo monitor conectado";
+                        label: root.i18n_hotkey_screen_label;
+                        description: root.i18n_hotkey_screen_desc;
                         HorizontalLayout {
                             alignment: center;
                             spacing: 8px;
@@ -662,8 +783,8 @@ export component SettingsWindow inherits Window {
                     }
 
                     SettingItem {
-                        label: "Alternar Reserva de Espaço (AppBar)";
-                        description: "Liga/desliga a reserva de espaço nas janelas maximizadas";
+                        label: root.i18n_hotkey_reserve_label;
+                        description: root.i18n_hotkey_reserve_desc;
                         HorizontalLayout {
                             alignment: center;
                             spacing: 8px;
@@ -702,17 +823,17 @@ export component SettingsWindow inherits Window {
             alignment: end;
 
             Button {
-                text: "Cancelar";
+                text: root.i18n_btn_cancel;
                 clicked => { root.request_close(); }
             }
 
             Button {
-                text: "Aplicar";
+                text: root.i18n_btn_apply;
                 clicked => { root.request_apply(); }
             }
 
             Button {
-                text: "Salvar Alterações";
+                text: root.i18n_btn_save;
                 primary: true;
                 clicked => { root.request_save(); }
             }
