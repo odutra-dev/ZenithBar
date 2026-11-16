@@ -5,6 +5,7 @@ pub struct TrayEvents {
     pub toggle_side: bool,
     pub cycle_screen: bool,
     pub reload_sensors: bool,
+    pub update_pos: bool,
 }
 
 #[cfg(target_os = "windows")]
@@ -20,12 +21,16 @@ pub mod win32 {
     };
     use windows::Win32::UI::WindowsAndMessaging::{
         AppendMenuW, CreatePopupMenu, DestroyMenu, GetCursorPos, GetSystemMetrics,
-        LoadIconW, LoadImageW, SetForegroundWindow, TrackPopupMenuEx,
-        HICON, IDI_APPLICATION, IMAGE_ICON, LR_DEFAULTCOLOR, LR_SHARED,
-        MF_SEPARATOR, MF_STRING, SM_CXSMICON, SM_CYSMICON,
-        TPM_BOTTOMALIGN, TPM_RIGHTBUTTON,
-        WM_APP, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_RBUTTONUP,
+        LoadIconW, LoadImageW, SetForegroundWindow, SetWindowPos, TrackPopupMenuEx,
+        HICON, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOPMOST, IDI_APPLICATION, IMAGE_ICON,
+        LR_DEFAULTCOLOR, LR_SHARED, MF_SEPARATOR, MF_STRING, SM_CXSMICON, SM_CYSMICON,
+        SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, TPM_BOTTOMALIGN, TPM_RIGHTBUTTON,
+        WM_APP, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_RBUTTONUP, WM_USER,
     };
+
+    pub const WM_APPBAR_CALLBACK: u32 = WM_USER + 102;
+    pub const ABN_POSCHANGED: usize = 1;
+    pub const ABN_FULLSCREENAPP: usize = 2;
 
     const WM_TRAYICON: u32 = WM_APP + 42;
     const WM_HOTKEY: u32 = 0x0312;
@@ -49,6 +54,12 @@ pub mod win32 {
     static SHOULD_TOGGLE_SIDE: AtomicBool = AtomicBool::new(false);
     static SHOULD_CYCLE_SCREEN: AtomicBool = AtomicBool::new(false);
     static SHOULD_RELOAD_SENSORS: AtomicBool = AtomicBool::new(false);
+    static SHOULD_UPDATE_POS: AtomicBool = AtomicBool::new(false);
+    static IS_ALWAYS_TOP: AtomicBool = AtomicBool::new(true);
+
+    pub fn set_always_top_state(always_top: bool) {
+        IS_ALWAYS_TOP.store(always_top, Ordering::SeqCst);
+    }
 
     pub struct TrayIcon {
         hwnd: HWND,
@@ -136,6 +147,7 @@ pub mod win32 {
                 toggle_side: SHOULD_TOGGLE_SIDE.swap(false, Ordering::SeqCst),
                 cycle_screen: SHOULD_CYCLE_SCREEN.swap(false, Ordering::SeqCst),
                 reload_sensors: SHOULD_RELOAD_SENSORS.swap(false, Ordering::SeqCst),
+                update_pos: SHOULD_UPDATE_POS.swap(false, Ordering::SeqCst),
             }
         }
 
@@ -175,6 +187,52 @@ pub mod win32 {
         if msg == WM_HOTKEY {
             SHOULD_TOGGLE_VISIBILITY.store(true, Ordering::SeqCst);
             return LRESULT(0);
+        }
+
+        if msg == WM_APPBAR_CALLBACK {
+            match wparam.0 {
+                ABN_FULLSCREENAPP => {
+                    let is_fullscreen = lparam.0 != 0;
+                    if is_fullscreen {
+                        // Janela em tela cheia (jogos, YouTube, F11): envia a barra para trás
+                        unsafe {
+                            let _ = SetWindowPos(
+                                hwnd,
+                                Some(HWND_BOTTOM),
+                                0,
+                                0,
+                                0,
+                                0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                            );
+                        }
+                    } else {
+                        // Saiu de tela cheia: restaura Z-order conforme configuração
+                        let insert_after = if IS_ALWAYS_TOP.load(Ordering::SeqCst) {
+                            HWND_TOPMOST
+                        } else {
+                            HWND_NOTOPMOST
+                        };
+                        unsafe {
+                            let _ = SetWindowPos(
+                                hwnd,
+                                Some(insert_after),
+                                0,
+                                0,
+                                0,
+                                0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                            );
+                        }
+                    }
+                    return LRESULT(0);
+                }
+                ABN_POSCHANGED => {
+                    SHOULD_UPDATE_POS.store(true, Ordering::SeqCst);
+                    return LRESULT(0);
+                }
+                _ => {}
+            }
         }
 
         if msg == WM_TRAYICON {
@@ -276,6 +334,9 @@ pub mod win32 {
     pub static SHOULD_TOGGLE_SIDE: AtomicBool = AtomicBool::new(false);
     pub static SHOULD_CYCLE_SCREEN: AtomicBool = AtomicBool::new(false);
     pub static SHOULD_RELOAD_SENSORS: AtomicBool = AtomicBool::new(false);
+    pub static SHOULD_UPDATE_POS: AtomicBool = AtomicBool::new(false);
+
+    pub fn set_always_top_state(_always_top: bool) {}
 
     pub struct TrayIcon {}
 
@@ -296,6 +357,7 @@ pub mod win32 {
                 toggle_side: SHOULD_TOGGLE_SIDE.swap(false, Ordering::SeqCst),
                 cycle_screen: SHOULD_CYCLE_SCREEN.swap(false, Ordering::SeqCst),
                 reload_sensors: SHOULD_RELOAD_SENSORS.swap(false, Ordering::SeqCst),
+                update_pos: SHOULD_UPDATE_POS.swap(false, Ordering::SeqCst),
             }
         }
 

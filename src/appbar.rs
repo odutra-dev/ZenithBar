@@ -112,7 +112,7 @@ pub mod win32 {
             let mut abd = APPBARDATA {
                 cbSize: std::mem::size_of::<APPBARDATA>() as u32,
                 hWnd: self.hwnd,
-                uCallbackMessage: 0,
+                uCallbackMessage: windows::Win32::UI::WindowsAndMessaging::WM_USER + 102,
                 uEdge: match self.edge {
                     DockEdge::Left => ABE_LEFT,
                     DockEdge::Right => ABE_RIGHT,
@@ -157,13 +157,8 @@ pub mod win32 {
         }
 
         pub fn set_width(&mut self, width: i32) {
-            self.width = width;
-            if self.is_registered {
-                self.unregister();
-                self.register();
-            } else {
-                self.update_position();
-            }
+            self.width = width.clamp(180, 360);
+            self.update_position();
         }
 
         pub fn set_always_top(&mut self, always_top: bool) {
@@ -243,6 +238,13 @@ pub mod win32 {
 
                 if self.is_registered {
                     SHAppBarMessage(ABM_QUERYPOS, &mut abd);
+                    // The shell may move the requested edge to avoid another
+                    // appbar. Use the negotiated rectangle for both reservation
+                    // and actual window geometry.
+                    match self.edge {
+                        DockEdge::Left => abd.rc.right = abd.rc.left + physical_w,
+                        DockEdge::Right => abd.rc.left = abd.rc.right - physical_w,
+                    }
                     SHAppBarMessage(ABM_SETPOS, &mut abd);
                 }
 
@@ -255,10 +257,10 @@ pub mod win32 {
                 let _ = SetWindowPos(
                     self.hwnd,
                     Some(insert_after),
-                    x,
-                    y,
-                    w,
-                    h,
+                    abd.rc.left,
+                    abd.rc.top,
+                    abd.rc.right - abd.rc.left,
+                    abd.rc.bottom - abd.rc.top,
                     SWP_SHOWWINDOW | SWP_FRAMECHANGED | windows::Win32::UI::WindowsAndMessaging::SWP_NOACTIVATE,
                 );
 
