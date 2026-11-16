@@ -385,24 +385,36 @@ export component SettingsWindow inherits Window {
 
                     SettingItem {
                         label: "Largura da Barra Lateral";
-                        description: "Largura fixa em pixels reservada na tela";
+                        description: "Largura personalizável de 180px a 360px reservada na tela";
                         HorizontalLayout {
-                            spacing: 6px;
+                            spacing: 8px;
                             alignment: center;
-                            Button {
-                                text: root.sidebar_width == 240 ? "✔ 240px" : "240px";
-                                primary: root.sidebar_width == 240;
-                                clicked => { root.sidebar_width = 240; }
+                            Text { text: "180px"; color: #94a3b8; font-size: 11px; vertical-alignment: center; }
+                            Slider {
+                                width: 170px;
+                                minimum: 180;
+                                maximum: 360;
+                                value: root.sidebar_width;
+                                changed(val) => { root.sidebar_width = round(val); }
                             }
-                            Button {
-                                text: root.sidebar_width == 300 ? "✔ 300px" : "300px";
-                                primary: root.sidebar_width == 300;
-                                clicked => { root.sidebar_width = 300; }
-                            }
-                            Button {
-                                text: root.sidebar_width == 360 ? "✔ 360px" : "360px";
-                                primary: root.sidebar_width == 360;
-                                clicked => { root.sidebar_width = 360; }
+                            Text { text: "360px"; color: #94a3b8; font-size: 11px; vertical-alignment: center; }
+                            Rectangle {
+                                width: 58px;
+                                height: 26px;
+                                background: #38bdf820;
+                                border-radius: 4px;
+                                border-width: 1px;
+                                border-color: #38bdf860;
+                                HorizontalLayout {
+                                    alignment: center;
+                                    Text {
+                                        text: root.sidebar_width + "px";
+                                        color: #38bdf8;
+                                        font-size: 11px;
+                                        font-weight: 700;
+                                        vertical-alignment: center;
+                                    }
+                                }
                             }
                         }
                     }

@@ -119,6 +119,7 @@ export component AppWindow inherits Window {
     title: "ZenithBar";
     icon: @image-url("../assets/icon.png");
     width: root.sidebar_width_px * 1px;
+    height: root.sidebar_height_px * 1px;
     no-frame: true;
     background: Colors.rgb(15, 16, 21).with-alpha(root.bg_opacity_val);
     default-font-family: "Segoe UI Variable Display, Segoe UI, sans-serif";
@@ -133,6 +134,7 @@ export component AppWindow inherits Window {
 
     // Dynamic sizing & opacity
     in-out property <float> sidebar_width_px: 300;
+    in-out property <float> sidebar_height_px: 1080;
     in-out property <float> bg_opacity_val: 0.96;
 
     // System Header
@@ -226,13 +228,13 @@ export component AppWindow inherits Window {
                         spacing: 6px;
                         Text {
                             text: root.time_str;
-                            font-size: 18px;
+                            font-size: root.sidebar_width_px < 220 ? 15px : 18px;
                             font-weight: 800;
                             color: #ffffff;
                         }
                         Text {
                             text: root.hostname;
-                            font-size: 10px;
+                            font-size: root.sidebar_width_px < 220 ? 9px : 10px;
                             font-weight: 600;
                             color: #38bdf8;
                             vertical-alignment: center;
@@ -246,13 +248,13 @@ export component AppWindow inherits Window {
                         spacing: 6px;
                         Text {
                             text: root.date_str;
-                            font-size: 9px;
+                            font-size: root.sidebar_width_px < 220 ? 8.5px : 9px;
                             color: #94a3b8;
                             overflow: elide;
                         }
                         Text {
                             text: "• " + root.uptime_str;
-                            font-size: 9px;
+                            font-size: root.sidebar_width_px < 220 ? 8.5px : 9px;
                             color: #64748b;
                             overflow: elide;
                         }
@@ -334,14 +336,14 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         spacing: 4px;
                         Text {
-                            text: "Clock: " + root.cpu_clock_str;
+                            text: root.sidebar_width_px < 220 ? root.cpu_clock_str : "Clock: " + root.cpu_clock_str;
                             font-size: 9.5px;
                             color: #cbd5e1;
                             overflow: elide;
                             horizontal-stretch: 1;
                         }
                         Text {
-                            text: "Temp: " + root.cpu_temp_str;
+                            text: root.sidebar_width_px < 220 ? root.cpu_temp_str : "Temp: " + root.cpu_temp_str;
                             font-size: 9.5px;
                             font-weight: 700;
                             color: root.cpu_temp_val > 80.0 ? #ef4444 : #f1f5f9;
@@ -405,7 +407,7 @@ export component AppWindow inherits Window {
                             overflow: elide;
                             horizontal-stretch: 1;
                         }
-                        Text {
+                        if root.sidebar_width_px >= 220 : Text {
                             text: root.ram_available_str;
                             font-size: 9.5px;
                             color: #94a3b8;
@@ -442,14 +444,14 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         spacing: 4px;
                         Text {
-                            text: "VRAM: " + root.gpu_vram_str;
+                            text: root.sidebar_width_px < 220 ? root.gpu_vram_str : "VRAM: " + root.gpu_vram_str;
                             font-size: 9.5px;
                             color: #cbd5e1;
                             overflow: elide;
                             horizontal-stretch: 1;
                         }
                         Text {
-                            text: "Temp: " + root.gpu_temp_str;
+                            text: root.sidebar_width_px < 220 ? root.gpu_temp_str : "Temp: " + root.gpu_temp_str;
                             font-size: 9.5px;
                             font-weight: 700;
                             color: root.gpu_temp_val > 80.0 ? #ef4444 : #f1f5f9;
@@ -590,25 +592,19 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         spacing: 4px;
                         Text {
-                            text: "Local: " + root.net_ip_str;
+                            text: root.sidebar_width_px < 220 ? root.net_ip_str : "Local: " + root.net_ip_str;
                             font-size: 9px;
                             color: #64748b;
                             overflow: elide;
                             horizontal-stretch: 1;
                         }
-                        Text {
+                        if root.sidebar_width_px >= 220 : Text {
                             text: "WAN: " + root.net_ext_ip_str;
                             font-size: 9px;
                             color: #38bdf8;
                             overflow: elide;
                         }
                     }
-
-                    if root.show_sparklines : Sparkline {
-                        values: root.net_history;
-                        line_color: #f43f5e;
-                    }
-                }
 
                     if root.show_sparklines : Sparkline {
                         values: root.net_history;
@@ -683,3 +679,4 @@ export component AppWindow inherits Window {
             }
         }
     }
+}

@@ -265,6 +265,8 @@ impl AppConfig {
         let path = Self::config_path();
         if let Ok(content) = fs::read_to_string(&path) {
             if let Ok(cfg) = serde_json::from_str::<Self>(&content) {
+                let mut cfg = cfg;
+                cfg.sidebar_width = cfg.sidebar_width.clamp(180, 360);
                 return cfg;
             }
         }
@@ -289,13 +291,15 @@ impl AppConfig {
                     if let Some(r) = legacy.refresh_interval_ms { cfg.polling_interval = r; }
                     if let Some(d) = legacy.dock_right { cfg.set_dock_right(d); }
                     if let Some(u) = legacy.use_appbar { cfg.use_app_bar = u; }
-                    if let Some(w) = legacy.bar_width { cfg.sidebar_width = w; }
+                    if let Some(w) = legacy.bar_width { cfg.sidebar_width = w.clamp(180, 360); }
                     if let Some(m) = legacy.monitor_index { cfg.screen_index = m; }
                     if let Some(ad) = legacy.show_all_disks { cfg.show_all_disks = ad; }
                     if let Some(g) = legacy.show_gpu { cfg.enable_gpu = g; }
                     if let Some(s) = legacy.show_sparklines { cfg.show_sparklines = s; }
                     let _ = cfg.save();
-                    return cfg;
+                    let mut cfg = cfg;
+                cfg.sidebar_width = cfg.sidebar_width.clamp(180, 360);
+                return cfg;
                 }
             }
         }
