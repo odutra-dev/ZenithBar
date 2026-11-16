@@ -321,6 +321,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let logical_h = if scale > 0.0 { target_monitor.work_height as f32 / scale } else { target_monitor.work_height as f32 };
         ui.set_sidebar_height_px(logical_h);
         tray::win32::set_always_top_state(config.borrow().always_top);
+
+        let cfg = config.borrow();
+        let physical_w = if scale > 0.0 { (cfg.sidebar_width as f32 * scale).round() as i32 } else { cfg.sidebar_width as i32 };
+        let init_x = if cfg.is_dock_right() {
+            target_monitor.work_right - physical_w
+        } else {
+            target_monitor.work_left
+        };
+        let init_y = target_monitor.work_top;
+        ui.window().set_position(slint::PhysicalPosition::new(init_x, init_y));
+        log_msg(&format!("Posição inicial ancorada pré-configurada: ({}, {})", init_x, init_y));
     }
 
     // Gerenciador do AppBar e Ãcone da Bandeja mantidos vivos
@@ -555,14 +566,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         move || {
             log_msg("5. Timer pÃ³s-mapeamento: aplicando estilos de janela, DWM, Tray e AppBar...");
             #[cfg(target_os = "windows")]
-            unsafe {
-                use windows::core::w;
-                use windows::Win32::UI::WindowsAndMessaging::FindWindowW;
-
-                if let Ok(hwnd) = FindWindowW(None, w!("ZenithBar")) {
-                    if !hwnd.0.is_null() {
-                        let hwnd_isize = hwnd.0 as isize;
-                        log_msg(&format!("Janela HWND encontrada: 0x{:X}", hwnd_isize));
+            {
+                if let Some(hwnd) = find_main_hwnd() {
+                    let hwnd_isize = hwnd.0 as isize;
+                    log_msg(&format!("Janela HWND encontrada: 0x{:X}", hwnd_isize));
 
                         // 1. DWM Mica / Acrylic
                         dwm::win32::apply_fluent_effects(hwnd_isize);
@@ -613,11 +620,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             *is_vis_init.borrow_mut() = false;
                         }
                         *appbar_ref.borrow_mut() = Some(ab);
-                    } else {
-                        log_msg("Aviso: HWND nulo retornado por FindWindowW.");
-                    }
                 } else {
-                    log_msg("Aviso: FindWindowW nÃ£o encontrou a janela ZenithBar.");
+                    log_msg("Aviso: HWND da janela ZenithBar não encontrado no timer pós-mapeamento.");
                 }
             }
 
@@ -672,6 +676,56 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     slint::run_event_loop()?;
     log_msg("Loop de eventos finalizado normalmente.");
     Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn find_main_hwnd() -> Option<windows::Win32::Foundation::HWND> {
+    use windows::core::{w, BOOL};
+    use windows::Win32::Foundation::{HWND, LPARAM};
+    use windows::Win32::System::Threading::GetCurrentProcessId;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        EnumWindows, FindWindowW, GetWindowTextW, GetWindowThreadProcessId,
+    };
+
+    unsafe {
+        if let Ok(hwnd) = FindWindowW(None, w!("ZenithBar")) {
+            if !hwnd.0.is_null() {
+                return Some(hwnd);
+            }
+        }
+
+        struct SearchData {
+            pid: u32,
+            found: Option<HWND>,
+        }
+        let mut data = SearchData {
+            pid: GetCurrentProcessId(),
+            found: None,
+        };
+
+        unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+            unsafe {
+                let data = &mut *(lparam.0 as *mut SearchData);
+                let mut pid = 0u32;
+                GetWindowThreadProcessId(hwnd, Some(&mut pid));
+                if pid == data.pid {
+                    let mut buf = [0u16; 64];
+                    let len = GetWindowTextW(hwnd, &mut buf);
+                    if len > 0 {
+                        let title = String::from_utf16_lossy(&buf[..len as usize]);
+                        if title == "ZenithBar" {
+                            data.found = Some(hwnd);
+                            return BOOL(0);
+                        }
+                    }
+                }
+                BOOL(1)
+            }
+        }
+
+        let _ = EnumWindows(Some(enum_proc), LPARAM(&mut data as *mut SearchData as isize));
+        data.found
+    }
 }
 
 fn apply_snapshot(ui: &AppWindow, snap: TelemetrySnapshot) {
