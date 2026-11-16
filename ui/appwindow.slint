@@ -302,18 +302,43 @@ export component AppWindow inherits Window {
                     Rectangle {
                         width: 22px;
                         height: 22px;
-                        background: #ffffff10;
+                        background: touch_dock.has-hover ? #ffffff25 : #ffffff10;
                         border-radius: 4px;
+                        animate background { duration: 120ms; }
                         Image {
                             source: @image-url("../assets/icons/dock.svg");
                             width: 12px;
                             height: 12px;
-                            colorize: #cbd5e1;
+                            colorize: touch_dock.has-hover ? #ffffff : #cbd5e1;
                             horizontal-alignment: center;
                             vertical-alignment: center;
+                            animate colorize { duration: 120ms; }
                         }
-                        TouchArea {
+                        touch_dock := TouchArea {
+                            mouse-cursor: pointer;
                             clicked => { root.request_toggle_dock(); }
+                        }
+                    }
+
+                    // Hide to tray button
+                    Rectangle {
+                        width: 22px;
+                        height: 22px;
+                        background: touch_hdr_hide.has-hover ? #ef444430 : #ffffff10;
+                        border-radius: 4px;
+                        animate background { duration: 120ms; }
+                        Image {
+                            source: @image-url("../assets/icons/close.svg");
+                            width: 10px;
+                            height: 10px;
+                            colorize: touch_hdr_hide.has-hover ? #ef4444 : #cbd5e1;
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                            animate colorize { duration: 120ms; }
+                        }
+                        touch_hdr_hide := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { root.request_quit(); }
                         }
                     }
                 }
@@ -672,21 +697,24 @@ export component AppWindow inherits Window {
                     alignment: center;
                     spacing: 6px;
 
-                    // Close/Quit
+                    // Close/Hide to tray button
                     Rectangle {
                         width: 20px;
                         height: 20px;
-                        background: #ffffff0a;
+                        background: touch_hide.has-hover ? #ef444430 : #ffffff0a;
                         border-radius: 4px;
+                        animate background { duration: 120ms; }
                         Image {
                             source: @image-url("../assets/icons/close.svg");
                             width: 10px;
                             height: 10px;
-                            colorize: #94a3b8;
+                            colorize: touch_hide.has-hover ? #ef4444 : #94a3b8;
                             horizontal-alignment: center;
                             vertical-alignment: center;
+                            animate colorize { duration: 120ms; }
                         }
-                        TouchArea {
+                        touch_hide := TouchArea {
+                            mouse-cursor: pointer;
                             clicked => { root.request_quit(); }
                         }
                     }

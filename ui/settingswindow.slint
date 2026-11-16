@@ -99,6 +99,7 @@ export component SettingsWindow inherits Window {
     callback request_move_module_up(string);
     callback request_move_module_down(string);
     callback culture_changed(string);
+    callback request_check_updates();
 
     // Estado da Aba Ativa: 0=Geral, 1=Avançado, 2=Estilo, 3=Monitores, 4=Atalhos
     in-out property <int> current_tab: 0;
@@ -146,6 +147,7 @@ export component SettingsWindow inherits Window {
     in-out property <string> i18n_collapse_menu_desc: "Hides settings and dock buttons for minimal look";
     in-out property <string> i18n_auto_update_label: "Automatic Update Check";
     in-out property <string> i18n_auto_update_desc: "Periodically checks for new ZenithBar versions";
+    in-out property <string> i18n_btn_check_update: "Check for Updates";
 
     // Tab Style
     in-out property <string> i18n_sidebar_width_label: "Sidebar Width";
@@ -497,9 +499,17 @@ export component SettingsWindow inherits Window {
                     SettingItem {
                         label: root.i18n_auto_update_label;
                         description: root.i18n_auto_update_desc;
-                        CheckBox {
-                            checked: root.auto_update;
-                            toggled => { root.auto_update = self.checked; }
+                        HorizontalLayout {
+                            spacing: 10px;
+                            alignment: center;
+                            Button {
+                                text: root.i18n_btn_check_update;
+                                clicked => { root.request_check_updates(); }
+                            }
+                            CheckBox {
+                                checked: root.auto_update;
+                                toggled => { root.auto_update = self.checked; }
+                            }
                         }
                     }
                 }

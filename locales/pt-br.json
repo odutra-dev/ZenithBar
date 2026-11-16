@@ -98,5 +98,16 @@
   "tray_cycle_monitor": "Alternar Monitor",
   "tray_reload_sensors": "Recarregar Sensores",
   "tray_github": "GitHub (Repositório)",
-  "tray_exit": "Sair do ZenithBar"
+  "tray_exit": "Sair do ZenithBar",
+  "btn_check_update": "Verificar Atualizações",
+  "update_checking": "Verificando atualizações...",
+  "update_available_title": "Atualização Disponível",
+  "update_available_msg": "Uma nova versão do ZenithBar está disponível!",
+  "update_new_version": "Nova versão",
+  "update_current_version": "Versão atual",
+  "update_ask_prompt": "Deseja baixar e atualizar agora?",
+  "update_up_to_date_title": "Atualização do ZenithBar",
+  "update_up_to_date_msg": "Você já está usando a versão mais recente do ZenithBar.",
+  "update_downloading": "Baixando atualização e reiniciando o ZenithBar...",
+  "update_failed": "Falha ao concluir atualização:"
 }

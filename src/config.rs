@@ -316,13 +316,17 @@ impl AppConfig {
         })?;
         fs::write(path, serialized)?;
 
+        self.apply_startup();
+
+        Ok(())
+    }
+
+    pub fn apply_startup(&self) {
         #[cfg(target_os = "windows")]
         self.apply_windows_startup();
 
         #[cfg(not(target_os = "windows"))]
         self.apply_linux_startup();
-
-        Ok(())
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -398,10 +402,10 @@ impl AppConfig {
                 if self.run_at_startup {
                     if let Ok(exe_path) = std::env::current_exe() {
                         let path_str = format!("\"{}\"", exe_path.to_string_lossy());
-                        let h_val = HSTRING::from(path_str);
-                        let bytes = std::slice::from_raw_parts(
-                            h_val.as_ptr() as *const u8,
-                            (h_val.len() + 1) * 2,
+                        let wide: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
+                        let bytes: &[u8] = std::slice::from_raw_parts(
+                            wide.as_ptr() as *const u8,
+                            wide.len() * 2,
                         );
                         let _ = RegSetValueExW(
                             hkey,

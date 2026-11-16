@@ -124,6 +124,19 @@ pub struct I18nStrings {
     pub tray_reload_sensors: String,
     pub tray_github: String,
     pub tray_exit: String,
+
+    // Updates
+    pub btn_check_update: String,
+    pub update_checking: String,
+    pub update_available_title: String,
+    pub update_available_msg: String,
+    pub update_new_version: String,
+    pub update_current_version: String,
+    pub update_ask_prompt: String,
+    pub update_up_to_date_title: String,
+    pub update_up_to_date_msg: String,
+    pub update_downloading: String,
+    pub update_failed: String,
 }
 
 impl Default for I18nStrings {

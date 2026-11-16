@@ -7,6 +7,7 @@ mod i18n;
 mod monitor;
 mod telemetry;
 mod tray;
+mod updater;
 
 #[allow(unused_imports)]
 use appbar::{win32::AppBarManager, DockEdge};
@@ -31,10 +32,12 @@ fn log_msg(msg: &str) {
         .and_then(|mut f| writeln!(f, "[{}] {}", Local::now().format("%Y-%m-%d %H:%M:%S"), msg));
 }
 
-fn appbar_hide(#[allow(unused_variables)] ui: &AppWindow, ab: &mut Option<AppBarManager>, is_vis: &RefCell<bool>) {
+fn appbar_hide(ui: &AppWindow, ab: &mut Option<AppBarManager>, is_vis: &RefCell<bool>) {
     if let Some(ab_mgr) = ab.as_mut() {
         ab_mgr.unregister();
         ab_mgr.hide_window();
+    } else {
+        let _ = ui.hide();
     }
     #[cfg(not(target_os = "windows"))]
     let _ = ui.hide();
@@ -42,13 +45,15 @@ fn appbar_hide(#[allow(unused_variables)] ui: &AppWindow, ab: &mut Option<AppBar
     log_msg("Barra ocultada para a bandeja (AppBar liberado).");
 }
 
-fn appbar_show(#[allow(unused_variables)] ui: &AppWindow, ab: &mut Option<AppBarManager>, is_vis: &RefCell<bool>) {
-    #[cfg(not(target_os = "windows"))]
-    let _ = ui.show();
+fn appbar_show(ui: &AppWindow, ab: &mut Option<AppBarManager>, is_vis: &RefCell<bool>) {
     if let Some(ab_mgr) = ab.as_mut() {
         ab_mgr.show_window();
         ab_mgr.register();
+    } else {
+        let _ = ui.show();
     }
+    #[cfg(not(target_os = "windows"))]
+    let _ = ui.show();
     *is_vis.borrow_mut() = true;
     log_msg("Barra reexibida na tela (AppBar registrado).");
 }
@@ -108,6 +113,7 @@ fn apply_locale_to_settings(sw: &SettingsWindow, s: &i18n::I18nStrings) {
     sw.set_i18n_collapse_menu_desc(s.collapse_menu_desc.clone().into());
     sw.set_i18n_auto_update_label(s.auto_update_label.clone().into());
     sw.set_i18n_auto_update_desc(s.auto_update_desc.clone().into());
+    sw.set_i18n_btn_check_update(s.btn_check_update.clone().into());
 
     sw.set_i18n_sidebar_width_label(s.sidebar_width_label.clone().into());
     sw.set_i18n_sidebar_width_desc(s.sidebar_width_desc.clone().into());
@@ -442,6 +448,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ui.set_sidebar_height_px(logical_h);
         tray::win32::set_always_top_state(config.borrow().always_top);
         tray::win32::set_tray_culture(&config.borrow().culture);
+        config.borrow().apply_startup();
 
         let cfg = config.borrow();
         let physical_w = if scale > 0.0 { (cfg.sidebar_width as f32 * scale).round() as i32 } else { cfg.sidebar_width as i32 };
@@ -575,6 +582,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             let _ = sw.hide();
         }
+    });
+
+    let config_check = config.clone();
+    settings_ui.on_request_check_updates(move || {
+        let culture = config_check.borrow().culture.clone();
+        std::thread::spawn(move || {
+            updater::run_manual_update_check(&culture);
+        });
     });
 
     let appbar_ref = appbar_holder.clone();
@@ -805,8 +820,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         },
     );
 
-    log_msg("6. Exibindo janela inicial e iniciando loop de eventos...");
-    ui.show()?;
+    // Verificação de atualização em segundo plano (se habilitado)
+    if config.borrow().auto_update {
+        let culture_auto = config.borrow().culture.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs(4));
+            log_msg("[Auto-Update] Verificando novas versões no GitHub em segundo plano...");
+            if let Ok(Some(release)) = updater::check_github_release() {
+                updater::prompt_and_install_update(&release, &culture_auto);
+            }
+        });
+    }
+
+    if !config.borrow().initially_hidden {
+        log_msg("6. Exibindo janela inicial e iniciando loop de eventos...");
+        ui.show()?;
+    } else {
+        log_msg("6. Modo Inicialmente Oculto ativo: minimizado diretamente na bandeja.");
+    }
 
     slint::run_event_loop()?;
     log_msg("Loop de eventos finalizado normalmente.");
