@@ -60,7 +60,12 @@ pub fn check_github_release() -> Result<Option<ReleaseInfo>, String> {
     if let Some(assets) = json["assets"].as_array() {
         for asset in assets {
             let asset_name = asset["name"].as_str().unwrap_or("");
-            if asset_name.eq_ignore_ascii_case("ZenithBar.exe") || asset_name.ends_with(".exe") {
+            #[cfg(target_os = "windows")]
+            let matches = asset_name.eq_ignore_ascii_case("ZenithBar.exe") || asset_name.ends_with(".exe");
+            #[cfg(not(target_os = "windows"))]
+            let matches = asset_name.ends_with(".AppImage") || asset_name.eq_ignore_ascii_case("ZenithBar");
+
+            if matches {
                 if let Some(url) = asset["browser_download_url"].as_str() {
                     download_url = Some(url.to_string());
                     break;
@@ -71,7 +76,12 @@ pub fn check_github_release() -> Result<Option<ReleaseInfo>, String> {
 
     let download_url = match download_url {
         Some(u) => u,
-        None => return Err("No executable asset (.exe) found in release".to_string()),
+        None => {
+            #[cfg(target_os = "windows")]
+            return Err("No executable asset (.exe) found in release".to_string());
+            #[cfg(not(target_os = "windows"))]
+            return Err("No Linux package (.AppImage) found in release".to_string());
+        }
     };
 
     Ok(Some(ReleaseInfo {
@@ -82,10 +92,9 @@ pub fn check_github_release() -> Result<Option<ReleaseInfo>, String> {
     }))
 }
 
-#[allow(dead_code)]
 pub fn download_and_install_update(download_url: &str) -> Result<(), String> {
     let current_exe = std::env::current_exe().map_err(|e| format!("Could not get current executable path: {}", e))?;
-    let temp_file = std::env::temp_dir().join(format!("zenithbar_update_{}.exe", std::process::id()));
+    let temp_file = std::env::temp_dir().join(format!("zenithbar_update_{}.tmp", std::process::id()));
 
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(120))
@@ -144,10 +153,19 @@ pub fn download_and_install_update(download_url: &str) -> Result<(), String> {
     {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(&temp_file, fs::Permissions::from_mode(0o755));
-        fs::rename(&temp_file, &current_exe)
-            .map_err(|e| format!("Failed to replace executable: {}", e))?;
+
+        let old_exe = current_exe.with_extension("old");
+        if old_exe.exists() {
+            let _ = fs::remove_file(&old_exe);
+        }
+        let _ = fs::rename(&current_exe, &old_exe);
+        if let Err(e) = fs::rename(&temp_file, &current_exe) {
+            let _ = fs::rename(&old_exe, &current_exe);
+            return Err(format!("Failed to replace executable: {}", e));
+        }
         let _ = std::process::Command::new(&current_exe).spawn()
             .map_err(|e| format!("Failed to spawn process: {}", e))?;
+        crate::log_msg("Atualização concluída no Linux. Reiniciando ZenithBar...");
         std::process::exit(0);
     }
 }
@@ -155,6 +173,50 @@ pub fn download_and_install_update(download_url: &str) -> Result<(), String> {
 #[cfg(target_os = "windows")]
 fn to_wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn prompt_user_linux(title: &str, body: &str) -> bool {
+    // 1. Try zenity
+    if let Ok(status) = std::process::Command::new("zenity")
+        .args(["--question", "--title", title, "--text", body])
+        .status()
+    {
+        return status.success();
+    }
+
+    // 2. Try kdialog (KDE)
+    if let Ok(status) = std::process::Command::new("kdialog")
+        .args(["--title", title, "--yesno", body])
+        .status()
+    {
+        return status.success();
+    }
+
+    false
+}
+
+#[cfg(not(target_os = "windows"))]
+fn notify_user_linux(title: &str, body: &str) {
+    if let Ok(status) = std::process::Command::new("zenity")
+        .args(["--info", "--title", title, "--text", body])
+        .status()
+    {
+        if status.success() {
+            return;
+        }
+    }
+    if let Ok(status) = std::process::Command::new("kdialog")
+        .args(["--title", title, "--msgbox", body])
+        .status()
+    {
+        if status.success() {
+            return;
+        }
+    }
+    let _ = std::process::Command::new("notify-send")
+        .args(["-a", "ZenithBar", title, body])
+        .status();
 }
 
 pub fn prompt_and_install_update(release: &ReleaseInfo, culture: &str) {
@@ -208,14 +270,26 @@ pub fn prompt_and_install_update(release: &ReleaseInfo, culture: &str) {
 
     #[cfg(not(target_os = "windows"))]
     {
-        crate::log_msg(&format!(
-            "[{}] {}: {} (atual: v{}) - URL: {}",
-            s.update_available_title,
+        let title = format!("ZenithBar - {}", s.update_available_title);
+        let body = format!(
+            "{}\n\n{}: {}\n{}: v{}\n\n{}",
+            s.update_available_msg,
             s.update_new_version,
             release.tag_name,
+            s.update_current_version,
             current_version,
-            release.download_url
-        ));
+            s.update_ask_prompt
+        );
+
+        if prompt_user_linux(&title, &body) {
+            crate::log_msg(&format!("Usuário autorizou download da atualização {}.", release.tag_name));
+            if let Err(e) = download_and_install_update(&release.download_url) {
+                notify_user_linux("ZenithBar - Erro", &format!("{} {}", s.update_failed, e));
+            }
+        } else {
+            // Se o usuário não tiver zenity/kdialog ou cancelar, abre no navegador padrão
+            let _ = std::process::Command::new("xdg-open").arg(&release.html_url).spawn();
+        }
     }
 }
 
@@ -240,7 +314,9 @@ pub fn run_manual_update_check(culture: &str) {
             }
             #[cfg(not(target_os = "windows"))]
             {
-                crate::log_msg(&format!("{} (v{})", s.update_up_to_date_msg, env!("CARGO_PKG_VERSION")));
+                let current_version = env!("CARGO_PKG_VERSION");
+                let body = format!("{} (v{})", s.update_up_to_date_msg, current_version);
+                notify_user_linux(&s.update_up_to_date_title, &body);
             }
         }
         Err(e) => {
@@ -256,7 +332,7 @@ pub fn run_manual_update_check(culture: &str) {
             }
             #[cfg(not(target_os = "windows"))]
             {
-                crate::log_msg(&format!("{} {}", s.update_failed, e));
+                notify_user_linux("ZenithBar - Update Error", &format!("{} {}", s.update_failed, e));
             }
         }
     }
