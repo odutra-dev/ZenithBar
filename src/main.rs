@@ -730,6 +730,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                     }
+
+                    if events.exit {
+                        log_msg("Saída solicitada pelo menu da bandeja.");
+                        let _ = slint::quit_event_loop();
+                    }
                 }
             }
 

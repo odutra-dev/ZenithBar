@@ -6,6 +6,7 @@ pub struct TrayEvents {
     pub cycle_screen: bool,
     pub reload_sensors: bool,
     pub update_pos: bool,
+    pub exit: bool,
 }
 
 #[cfg(target_os = "windows")]
@@ -55,6 +56,7 @@ pub mod win32 {
     static SHOULD_CYCLE_SCREEN: AtomicBool = AtomicBool::new(false);
     static SHOULD_RELOAD_SENSORS: AtomicBool = AtomicBool::new(false);
     static SHOULD_UPDATE_POS: AtomicBool = AtomicBool::new(false);
+    static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
     static IS_ALWAYS_TOP: AtomicBool = AtomicBool::new(true);
     static TRAY_CULTURE: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
 
@@ -159,6 +161,7 @@ pub mod win32 {
                 cycle_screen: SHOULD_CYCLE_SCREEN.swap(false, Ordering::SeqCst),
                 reload_sensors: SHOULD_RELOAD_SENSORS.swap(false, Ordering::SeqCst),
                 update_pos: SHOULD_UPDATE_POS.swap(false, Ordering::SeqCst),
+                exit: SHOULD_EXIT.swap(false, Ordering::SeqCst),
             }
         }
 
@@ -342,7 +345,7 @@ pub mod win32 {
                     );
                 }
                 ID_EXIT => {
-                    std::process::exit(0);
+                    SHOULD_EXIT.store(true, Ordering::SeqCst);
                 }
                 _ => {}
             }
@@ -361,6 +364,7 @@ pub mod win32 {
     pub static SHOULD_CYCLE_SCREEN: AtomicBool = AtomicBool::new(false);
     pub static SHOULD_RELOAD_SENSORS: AtomicBool = AtomicBool::new(false);
     pub static SHOULD_UPDATE_POS: AtomicBool = AtomicBool::new(false);
+    pub static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
 
     pub fn set_always_top_state(_always_top: bool) {}
     pub fn set_tray_culture(_culture: &str) {}
@@ -385,6 +389,7 @@ pub mod win32 {
                 cycle_screen: SHOULD_CYCLE_SCREEN.swap(false, Ordering::SeqCst),
                 reload_sensors: SHOULD_RELOAD_SENSORS.swap(false, Ordering::SeqCst),
                 update_pos: SHOULD_UPDATE_POS.swap(false, Ordering::SeqCst),
+                exit: SHOULD_EXIT.swap(false, Ordering::SeqCst),
             }
         }
 
