@@ -285,6 +285,7 @@ export component AppWindow inherits Window {
     in-out property <string> i18n_clock: "Clock";
     in-out property <string> i18n_temp: "Temp";
     in-out property <string> i18n_usage_per_core: "Per-Core Usage:";
+    in-out property <string> i18n_usage: "uso";
     in-out property <string> i18n_fan: "Fan";
     in-out property <string> i18n_local_ip: "Local";
     in-out property <string> i18n_wan_ip: "WAN";
@@ -306,8 +307,8 @@ export component AppWindow inherits Window {
     in-out property <string> cpu_name: "Intel / AMD Processor";
     in-out property <float> cpu_usage: 0.15;
     in-out property <string> cpu_usage_str: "15%";
-    in-out property <string> cpu_clock_str: "4.20 GHz";
-    in-out property <string> cpu_temp_str: "45 °C";
+    in-out property <string> cpu_clock_str: "4.2 GHz";
+    in-out property <string> cpu_temp_str: "45°C";
     in-out property <float> cpu_temp_val: 45.0;
     in-out property <[float]> cpu_history: [0.1, 0.12, 0.15, 0.14, 0.18, 0.22, 0.19, 0.16, 0.15, 0.15];
     in-out property <[float]> cpu_core_loads: [0.1, 0.2, 0.15, 0.25, 0.1, 0.3, 0.05, 0.18];
@@ -324,10 +325,13 @@ export component AppWindow inherits Window {
     in-out property <string> gpu_name: "GPU Dedicada";
     in-out property <float> gpu_usage: 0.20;
     in-out property <string> gpu_usage_str: "20%";
-    in-out property <string> gpu_temp_str: "52 °C";
+    in-out property <string> gpu_clock_str: "-- GHz";
+    in-out property <string> gpu_temp_str: "52°C";
     in-out property <float> gpu_temp_val: 52.0;
     in-out property <string> gpu_vram_str: "3.5 / 12.0 GB";
+    in-out property <string> gpu_vram_pct_str: "29%";
     in-out property <string> gpu_fan_str: "1250 RPM";
+    in-out property <string> gpu_fan_pct_str: "--%";
     in-out property <[float]> gpu_history: [0.05, 0.08, 0.12, 0.25, 0.32, 0.20, 0.15, 0.18, 0.22, 0.20];
 
     // Disks
@@ -490,7 +494,6 @@ export component AppWindow inherits Window {
                     icon_source: @image-url("../assets/icons/cpu.svg");
                     accent_color: #38bdf8;
                     alert_active: root.cpu_usage > 0.85 || root.cpu_temp_val > 80.0;
-                    badge: root.cpu_usage_str;
 
                     EditableLabel {
                         text: root.cpu_name;
@@ -505,21 +508,38 @@ export component AppWindow inherits Window {
                         bar_color: root.cpu_usage > 0.85 ? #ef4444 : #38bdf8;
                     }
 
-                    HorizontalLayout {
-                        spacing: 4px;
-                        Text {
-                            text: root.sidebar_width_px < 220 ? root.cpu_clock_str : root.i18n_clock + ": " + root.cpu_clock_str;
-                            font-size: 9.5px;
-                            color: #cbd5e1;
-                            overflow: elide;
-                            horizontal-stretch: 1;
+                    VerticalLayout {
+                        spacing: 2px;
+                        HorizontalLayout {
+                            alignment: space-between;
+                            Text {
+                                text: "CPU:";
+                                font-size: 10px;
+                                font-weight: 700;
+                                color: #cbd5e1;
+                            }
+                            Text {
+                                text: root.cpu_temp_str;
+                                font-size: 10px;
+                                font-weight: 700;
+                                color: root.cpu_temp_val > 80.0 ? #ef4444 : #f1f5f9;
+                            }
                         }
-                        Text {
-                            text: root.sidebar_width_px < 220 ? root.cpu_temp_str : root.i18n_temp + ": " + root.cpu_temp_str;
-                            font-size: 9.5px;
-                            font-weight: 700;
-                            color: root.cpu_temp_val > 80.0 ? #ef4444 : #f1f5f9;
-                            overflow: elide;
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            Text {
+                                text: root.cpu_clock_str;
+                                font-size: 9.5px;
+                                color: #cbd5e1;
+                            }
+                        }
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            Text {
+                                text: root.i18n_usage + ": " + root.cpu_usage_str;
+                                font-size: 9.5px;
+                                color: #cbd5e1;
+                            }
                         }
                     }
 
@@ -605,7 +625,6 @@ export component AppWindow inherits Window {
                     icon_source: @image-url("../assets/icons/gpu.svg");
                     accent_color: #10b981;
                     alert_active: root.gpu_usage > 0.85 || root.gpu_temp_val > 80.0;
-                    badge: root.gpu_usage_str;
 
                     EditableLabel {
                         text: root.gpu_name;
@@ -620,29 +639,55 @@ export component AppWindow inherits Window {
                         bar_color: root.gpu_usage > 0.85 ? #ef4444 : #10b981;
                     }
 
-                    HorizontalLayout {
-                        spacing: 4px;
-                        Text {
-                            text: root.sidebar_width_px < 220 ? root.gpu_vram_str : "VRAM: " + root.gpu_vram_str;
-                            font-size: 9.5px;
-                            color: #cbd5e1;
-                            overflow: elide;
-                            horizontal-stretch: 1;
+                    VerticalLayout {
+                        spacing: 2px;
+                        HorizontalLayout {
+                            alignment: space-between;
+                            Text {
+                                text: "GPU:";
+                                font-size: 10px;
+                                font-weight: 700;
+                                color: #cbd5e1;
+                            }
+                            Text {
+                                text: root.gpu_temp_str;
+                                font-size: 10px;
+                                font-weight: 700;
+                                color: root.gpu_temp_val > 80.0 ? #ef4444 : #f1f5f9;
+                            }
                         }
-                        Text {
-                            text: root.sidebar_width_px < 220 ? root.gpu_temp_str : root.i18n_temp + ": " + root.gpu_temp_str;
-                            font-size: 9.5px;
-                            font-weight: 700;
-                            color: root.gpu_temp_val > 80.0 ? #ef4444 : #f1f5f9;
-                            overflow: elide;
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            Text {
+                                text: root.gpu_clock_str;
+                                font-size: 9.5px;
+                                color: #cbd5e1;
+                            }
                         }
-                    }
-
-                    if root.gpu_fan_str != "" : Text {
-                        text: root.i18n_fan + ": " + root.gpu_fan_str;
-                        font-size: 9.5px;
-                        color: #94a3b8;
-                        overflow: elide;
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            Text {
+                                text: root.i18n_usage + ": " + root.gpu_usage_str;
+                                font-size: 9.5px;
+                                color: #cbd5e1;
+                            }
+                        }
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            Text {
+                                text: "VRAM: " + root.gpu_vram_pct_str;
+                                font-size: 9.5px;
+                                color: #cbd5e1;
+                            }
+                        }
+                        HorizontalLayout {
+                            padding-left: 14px;
+                            Text {
+                                text: root.i18n_fan + ": " + root.gpu_fan_pct_str;
+                                font-size: 9.5px;
+                                color: #94a3b8;
+                            }
+                        }
                     }
 
                     if root.show_sparklines : Sparkline {
@@ -743,11 +788,12 @@ export component AppWindow inherits Window {
                     accent_color: #f43f5e;
                     badge: root.net_download_str;
 
-                    Text {
+                    EditableLabel {
                         text: root.net_adapter_name;
-                        font-size: 10px;
-                        color: #94a3b8;
-                        overflow: elide;
+                        font_size: 10px;
+                        text_color: #94a3b8;
+                        accent_color: #f43f5e;
+                        committed(val) => { root.request_set_custom_net_name(val); }
                     }
 
                     HorizontalLayout {
