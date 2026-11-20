@@ -142,7 +142,9 @@ pub fn download_and_install_update(download_url: &str) -> Result<(), String> {
         }
 
         // Spawn updated executable
-        let _ = std::process::Command::new(&current_exe).spawn()
+        let _ = std::process::Command::new(&current_exe)
+            .arg("--restarted")
+            .spawn()
             .map_err(|e| format!("Failed to spawn updated process: {}", e))?;
 
         crate::log_msg("Atualização concluída com sucesso. Reiniciando novo ZenithBar.exe...");
@@ -163,7 +165,9 @@ pub fn download_and_install_update(download_url: &str) -> Result<(), String> {
             let _ = fs::rename(&old_exe, &current_exe);
             return Err(format!("Failed to replace executable: {}", e));
         }
-        let _ = std::process::Command::new(&current_exe).spawn()
+        let _ = std::process::Command::new(&current_exe)
+            .arg("--restarted")
+            .spawn()
             .map_err(|e| format!("Failed to spawn process: {}", e))?;
         crate::log_msg("Atualização concluída no Linux. Reiniciando ZenithBar...");
         std::process::exit(0);
