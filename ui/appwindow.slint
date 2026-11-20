@@ -81,99 +81,101 @@ component EditableLabel inherits Rectangle {
         }
     }
 
-    if !root.editing : HorizontalLayout {
-        padding-left: 2px;
-        padding-right: 2px;
-        padding-top: 1px;
-        padding-bottom: 1px;
-        spacing: 4px;
+    VerticalLayout {
+        if !root.editing : HorizontalLayout {
+            padding-left: 2px;
+            padding-right: 2px;
+            padding-top: 1px;
+            padding-bottom: 1px;
+            spacing: 4px;
 
-        Text {
-            text: root.text;
-            font-size: root.font_size;
-            font-weight: root.font_weight;
-            color: ta.has-hover ? #f1f5f9 : root.text_color;
-            wrap: word-wrap;
-            horizontal-stretch: 1;
-            vertical-alignment: center;
-        }
-
-        if ta.has-hover : Text {
-            text: "✎";
-            font-size: 9px;
-            color: root.accent_color;
-            vertical-alignment: center;
-        }
-    }
-
-    if root.editing : HorizontalLayout {
-        padding-left: 4px;
-        padding-right: 4px;
-        padding-top: 2px;
-        padding-bottom: 2px;
-        spacing: 4px;
-
-        edit_input := TextInput {
-            text <=> root.draft_text;
-            font-size: root.font_size;
-            font-weight: root.font_weight;
-            color: #f8fafc;
-            single-line: true;
-            horizontal-stretch: 1;
-            vertical-alignment: center;
-            init => {
-                self.focus();
-            }
-            accepted => {
-                root.editing = false;
-                root.committed(root.draft_text);
-            }
-            key-pressed(event) => {
-                if (event.text == Key.Escape) {
-                    root.editing = false;
-                    return accept;
-                }
-                return reject;
-            }
-        }
-
-        Rectangle {
-            width: 16px;
-            height: 16px;
-            border-radius: 3px;
-            background: ok_ta.has-hover ? #10b98140 : #ffffff12;
             Text {
-                text: "✓";
-                font-size: 9px;
-                color: #34d399;
-                horizontal-alignment: center;
+                text: root.text;
+                font-size: root.font_size;
+                font-weight: root.font_weight;
+                color: ta.has-hover ? #f1f5f9 : root.text_color;
+                wrap: word-wrap;
+                horizontal-stretch: 1;
                 vertical-alignment: center;
             }
-            ok_ta := TouchArea {
-                mouse-cursor: pointer;
-                clicked => {
+
+            if ta.has-hover : Text {
+                text: "✎";
+                font-size: 9px;
+                color: root.accent_color;
+                vertical-alignment: center;
+            }
+        }
+
+        if root.editing : HorizontalLayout {
+            padding-left: 4px;
+            padding-right: 4px;
+            padding-top: 2px;
+            padding-bottom: 2px;
+            spacing: 4px;
+
+            edit_input := TextInput {
+                text <=> root.draft_text;
+                font-size: root.font_size;
+                font-weight: root.font_weight;
+                color: #f8fafc;
+                single-line: true;
+                horizontal-stretch: 1;
+                vertical-alignment: center;
+                init => {
+                    self.focus();
+                }
+                accepted => {
                     root.editing = false;
                     root.committed(root.draft_text);
                 }
+                key-pressed(event) => {
+                    if (event.text == Key.Escape) {
+                        root.editing = false;
+                        return accept;
+                    }
+                    return reject;
+                }
             }
-        }
 
-        Rectangle {
-            width: 16px;
-            height: 16px;
-            border-radius: 3px;
-            background: cancel_ta.has-hover ? #ef444440 : #ffffff12;
-            Text {
-                text: "✕";
-                font-size: 9px;
-                color: #f87171;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+            Rectangle {
+                width: 16px;
+                height: 16px;
+                border-radius: 3px;
+                background: ok_ta.has-hover ? #10b98140 : #ffffff12;
+                Text {
+                    text: "✓";
+                    font-size: 9px;
+                    color: #34d399;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                ok_ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.editing = false;
+                        root.committed(root.draft_text);
+                    }
+                }
             }
-            cancel_ta := TouchArea {
-                mouse-cursor: pointer;
-                clicked => {
-                    root.editing = false;
+
+            Rectangle {
+                width: 16px;
+                height: 16px;
+                border-radius: 3px;
+                background: cancel_ta.has-hover ? #ef444440 : #ffffff12;
+                Text {
+                    text: "✕";
+                    font-size: 9px;
+                    color: #f87171;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+                cancel_ta := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.editing = false;
+                    }
                 }
             }
         }
