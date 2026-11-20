@@ -64,6 +64,7 @@ component MetricSection inherits Rectangle {
     in property <string> badge: "";
     callback toggle_collapse();
 
+    vertical-stretch: 0;
     background: root.alert_active ? #2a1015ee : #181920ee;
     border-radius: 8px;
     border-width: 1px;
@@ -72,6 +73,7 @@ component MetricSection inherits Rectangle {
     VerticalLayout {
         padding: 8px;
         spacing: 6px;
+        alignment: start;
 
         // Header
         HorizontalLayout {
@@ -95,7 +97,7 @@ component MetricSection inherits Rectangle {
                     color: root.alert_active ? #fca5a5 : #f1f5f9;
                     letter-spacing: 0.5px;
                     vertical-alignment: center;
-                    overflow: elide;
+                    wrap: word-wrap;
                     horizontal-stretch: 1;
                 }
             }
@@ -352,6 +354,7 @@ export component AppWindow inherits Window {
 
             VerticalLayout {
                 spacing: 6px;
+                alignment: start;
 
                 // CPU Section with Per-Core Grid & Threshold Alert
                 if root.enable_cpu : MetricSection {
@@ -391,28 +394,34 @@ export component AppWindow inherits Window {
                         }
                     }
 
-                    // Per-Core Load Micro-Bars Grid
-                    if root.cpu_core_loads.length > 0 : VerticalLayout {
+                    // Per-Core Load Micro-Bars Grid (fixed height)
+                    if (root.show_cpu_cores && root.cpu_core_loads.length > 0) : VerticalLayout {
                         spacing: 3px;
                         Text {
                             text: root.i18n_usage_per_core;
                             font-size: 9px;
                             color: #64748b;
                         }
-                        HorizontalLayout {
-                            spacing: 2px;
-                            for core_load in root.cpu_core_loads : Rectangle {
-                                horizontal-stretch: 1;
-                                height: 20px;
-                                background: #ffffff0a;
-                                border-radius: 2px;
-                                clip: true;
-                                VerticalLayout {
-                                    alignment: end;
-                                    Rectangle {
-                                        height: max(2px, core_load * 20px);
-                                        background: core_load > 0.85 ? #ef4444 : (core_load > 0.5 ? #f59e0b : #38bdf8);
-                                        border-radius: 1px;
+                        Rectangle {
+                            height: 24px;
+                            background: #00000020;
+                            border-radius: 4px;
+                            HorizontalLayout {
+                                padding: 2px;
+                                spacing: 2px;
+                                for core_load in root.cpu_core_loads : Rectangle {
+                                    horizontal-stretch: 1;
+                                    vertical-stretch: 1;
+                                    background: #ffffff0a;
+                                    border-radius: 2px;
+                                    clip: true;
+                                    VerticalLayout {
+                                        alignment: end;
+                                        Rectangle {
+                                            height: max(2px, core_load * 20px);
+                                            background: core_load > 0.85 ? #ef4444 : (core_load > 0.5 ? #f59e0b : #38bdf8);
+                                            border-radius: 1px;
+                                        }
                                     }
                                 }
                             }
@@ -564,7 +573,7 @@ export component AppWindow inherits Window {
                                     font-size: 9.5px;
                                     font-weight: 600;
                                     color: #f1f5f9;
-                                    overflow: elide;
+                                    wrap: word-wrap;
                                     horizontal-stretch: 1;
                                 }
                                 Text {
