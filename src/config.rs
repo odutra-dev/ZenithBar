@@ -135,6 +135,19 @@ pub struct AppConfig {
 
     #[serde(default = "default_empty_string")]
     pub hotkey_reserve_space: String,
+
+    // Nomes personalizados editáveis na interface (vazio = detectado automaticamente)
+    #[serde(default = "default_empty_string")]
+    pub custom_hostname: String,
+
+    #[serde(default = "default_empty_string")]
+    pub custom_cpu_name: String,
+
+    #[serde(default = "default_empty_string")]
+    pub custom_gpu_name: String,
+
+    #[serde(default = "default_empty_string")]
+    pub custom_net_name: String,
 }
 
 fn default_dock_edge() -> String { "Right".to_string() }
@@ -210,6 +223,10 @@ impl Default for AppConfig {
             hotkey_cycle_edge: default_empty_string(),
             hotkey_cycle_screen: default_empty_string(),
             hotkey_reserve_space: default_empty_string(),
+            custom_hostname: default_empty_string(),
+            custom_cpu_name: default_empty_string(),
+            custom_gpu_name: default_empty_string(),
+            custom_net_name: default_empty_string(),
         }
     }
 }
