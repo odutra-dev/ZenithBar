@@ -16,6 +16,8 @@ pub struct I18nStrings {
     pub clock: String,
     pub temp: String,
     pub usage_per_core: String,
+    #[serde(default = "default_usage_label")]
+    pub usage: String,
     pub available: String,
     pub fan: String,
     pub local_ip: String,
@@ -137,6 +139,10 @@ pub struct I18nStrings {
     pub update_up_to_date_msg: String,
     pub update_downloading: String,
     pub update_failed: String,
+}
+
+fn default_usage_label() -> String {
+    "uso".to_string()
 }
 
 impl Default for I18nStrings {

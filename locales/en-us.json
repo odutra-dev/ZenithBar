@@ -7,6 +7,7 @@
   "clock": "Clock",
   "temp": "Temp",
   "usage_per_core": "Per-Core Usage:",
+  "usage": "usage",
   "available": "Avail.",
   "fan": "Fan",
   "local_ip": "Local",
