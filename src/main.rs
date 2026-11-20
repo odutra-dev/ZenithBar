@@ -418,7 +418,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     log_msg("4. Inicializando thread de telemetria isolada em background (MTA)...");
-    let (tx, rx) = std::sync::mpsc::channel::<TelemetrySnapshot>();
+    let (tx, rx) = std::sync::mpsc::sync_channel::<TelemetrySnapshot>(1);
     let (interval_tx, interval_rx) = std::sync::mpsc::channel::<u64>();
     let initial_polling_interval = config.borrow().polling_interval.clamp(100, 10000);
     std::thread::spawn(move || {
@@ -427,8 +427,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut interval = initial_polling_interval;
         loop {
             let snap = engine.snapshot();
-            if tx.send(snap).is_err() {
-                break;
+            match tx.try_send(snap) {
+                Ok(()) | Err(std::sync::mpsc::TrySendError::Full(_)) => {}
+                Err(std::sync::mpsc::TrySendError::Disconnected(_)) => break,
             }
             match interval_rx.recv_timeout(Duration::from_millis(interval)) {
                 Ok(mut next) => {
@@ -767,7 +768,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ui.set_date_str(date_str.into());
 
                 if let Ok(rx_guard) = rx_ref.try_borrow() {
+                    let mut latest_snap = None;
                     while let Ok(snap) = rx_guard.try_recv() {
+                        latest_snap = Some(snap);
+                    }
+                    if let Some(snap) = latest_snap {
                         apply_snapshot(&ui, snap, &cfg, &detected_poll);
                     }
                 }
