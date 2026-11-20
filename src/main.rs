@@ -23,6 +23,18 @@ use tray::win32::TrayIcon;
 
 slint::include_modules!();
 
+const MAX_LOG_BYTES: u64 = 1_048_576; // 1 MB
+
+fn rotate_log_file(path: &std::path::Path, max_bytes: u64) {
+    if let Ok(meta) = std::fs::metadata(path) {
+        if meta.len() > max_bytes {
+            let backup = path.with_extension("log.old");
+            let _ = std::fs::remove_file(&backup);
+            let _ = std::fs::rename(path, backup);
+        }
+    }
+}
+
 fn log_msg(msg: &str) {
     use std::io::Write;
     let _ = std::fs::OpenOptions::new()
@@ -338,6 +350,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }));
 
+    rotate_log_file(std::path::Path::new("zenithbar.log"), MAX_LOG_BYTES);
     log_msg("--- ZenithBar Iniciando ---");
 
     log_msg("1. Carregando configuraÃ§Ãµes 1:1...");
@@ -1101,4 +1114,27 @@ fn apply_snapshot(
     ui.set_net_ext_ip_str(snap.net.external_ip.into());
     let net_hist = Rc::new(VecModel::from(snap.net.history));
     ui.set_net_history(ModelRc::from(net_hist));
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rotate_log_file_caps_oversized_log() {
+        let dir = std::env::temp_dir().join(format!("zenithbar_log_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let log_path = dir.join("zenithbar.log");
+        let backup_path = dir.join("zenithbar.log.old");
+
+        std::fs::write(&log_path, vec![b'x'; 2048]).unwrap();
+        rotate_log_file(&log_path, 1024);
+
+        assert!(!log_path.exists());
+        assert!(backup_path.exists());
+        assert_eq!(std::fs::metadata(&backup_path).unwrap().len(), 2048);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
