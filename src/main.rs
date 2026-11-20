@@ -14,7 +14,7 @@ use appbar::{win32::AppBarManager, DockEdge};
 use chrono::Local;
 use config::AppConfig;
 use monitor::win32::list_monitors;
-use slint::{ComponentHandle, ModelRc, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
@@ -665,6 +665,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ui_weak_timer = ui.as_weak();
     let settings_weak_timer = settings_ui.as_weak();
     let rx_ref = Rc::new(RefCell::new(rx));
+    let models = PersistentModels::attach(&ui);
     let config_poll = config.clone();
     let detected_poll = detected_names.clone();
     let is_vis_clone = is_visible.clone();
@@ -773,7 +774,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         latest_snap = Some(snap);
                     }
                     if let Some(snap) = latest_snap {
-                        apply_snapshot(&ui, snap, &cfg, &detected_poll);
+                        apply_snapshot(&ui, snap, &cfg, &detected_poll, &models);
                     }
                 }
             }
@@ -992,11 +993,60 @@ fn format_temp_c(temp: Option<f32>) -> (f32, String) {
     }
 }
 
+struct PersistentModels {
+    cpu_history: Rc<VecModel<f32>>,
+    cpu_core_loads: Rc<VecModel<f32>>,
+    ram_history: Rc<VecModel<f32>>,
+    gpu_history: Rc<VecModel<f32>>,
+    disks_list: Rc<VecModel<DiskInfo>>,
+    net_history: Rc<VecModel<f32>>,
+}
+
+impl PersistentModels {
+    fn attach(ui: &AppWindow) -> Self {
+        let models = Self {
+            cpu_history: Rc::new(VecModel::default()),
+            cpu_core_loads: Rc::new(VecModel::default()),
+            ram_history: Rc::new(VecModel::default()),
+            gpu_history: Rc::new(VecModel::default()),
+            disks_list: Rc::new(VecModel::default()),
+            net_history: Rc::new(VecModel::default()),
+        };
+        ui.set_cpu_history(ModelRc::from(models.cpu_history.clone()));
+        ui.set_cpu_core_loads(ModelRc::from(models.cpu_core_loads.clone()));
+        ui.set_ram_history(ModelRc::from(models.ram_history.clone()));
+        ui.set_gpu_history(ModelRc::from(models.gpu_history.clone()));
+        ui.set_disks_list(ModelRc::from(models.disks_list.clone()));
+        ui.set_net_history(ModelRc::from(models.net_history.clone()));
+        models
+    }
+}
+
+fn sync_vec_model<T: PartialEq + Clone + 'static>(model: &VecModel<T>, next: Vec<T>) {
+    let target_len = next.len();
+    let common = model.row_count().min(target_len);
+    let mut iter = next.into_iter();
+    for (idx, item) in iter.by_ref().take(common).enumerate() {
+        if model.row_data(idx).as_ref() != Some(&item) {
+            model.set_row_data(idx, item);
+        }
+    }
+    for item in iter {
+        model.push(item);
+    }
+    while model.row_count() > target_len {
+        if let Some(last) = model.row_count().checked_sub(1) {
+            model.remove(last);
+        }
+    }
+}
+
 fn apply_snapshot(
     ui: &AppWindow,
     snap: TelemetrySnapshot,
     cfg: &AppConfig,
     detected_names: &Rc<RefCell<DetectedNames>>,
+    models: &PersistentModels,
 ) {
     {
         let mut det = detected_names.borrow_mut();
@@ -1017,19 +1067,15 @@ fn apply_snapshot(
     let (cpu_temp_val, cpu_temp_str) = format_temp_c(snap.cpu.temperature_c);
     ui.set_cpu_temp_val(cpu_temp_val);
     ui.set_cpu_temp_str(cpu_temp_str.into());
-    let cpu_hist = Rc::new(VecModel::from(snap.cpu.history));
-    ui.set_cpu_history(ModelRc::from(cpu_hist));
-
-    let core_loads = Rc::new(VecModel::from(snap.cpu.core_usages));
-    ui.set_cpu_core_loads(ModelRc::from(core_loads));
+    sync_vec_model(&models.cpu_history, snap.cpu.history);
+    sync_vec_model(&models.cpu_core_loads, snap.cpu.core_usages);
 
     // RAM
     ui.set_ram_percent(snap.mem.percent);
     ui.set_ram_percent_str(format!("{:.0}%", snap.mem.percent * 100.0).into());
     ui.set_ram_usage_str(format!("{:.1} / {:.1} GB", snap.mem.used_gb, snap.mem.total_gb).into());
     ui.set_ram_available_str(format!("{:.1} GB Disp.", snap.mem.available_gb).into());
-    let ram_hist = Rc::new(VecModel::from(snap.mem.history));
-    ui.set_ram_history(ModelRc::from(ram_hist));
+    sync_vec_model(&models.ram_history, snap.mem.history);
 
     // GPU
     ui.set_gpu_detected(snap.gpu.detected);
@@ -1069,8 +1115,7 @@ fn apply_snapshot(
                 .unwrap_or_else(|| "--%".to_string())
                 .into(),
         );
-        let gpu_hist = Rc::new(VecModel::from(snap.gpu.history));
-        ui.set_gpu_history(ModelRc::from(gpu_hist));
+        sync_vec_model(&models.gpu_history, snap.gpu.history);
     }
 
     // Disks
@@ -1108,8 +1153,7 @@ fn apply_snapshot(
             write_speed: format!("{:.1} MB/s", d.write_mb_s).into(),
         });
     }
-    let disks_model = Rc::new(VecModel::from(slint_disks));
-    ui.set_disks_list(ModelRc::from(disks_model));
+    sync_vec_model(&models.disks_list, slint_disks);
 
     // Network
     ui.set_net_adapter_name(resolve_display_name(&cfg.custom_net_name, &snap.net.adapter_name).into());
@@ -1117,14 +1161,39 @@ fn apply_snapshot(
     ui.set_net_upload_str(format!("{:.1} Mbps", snap.net.upload_mbps).into());
     ui.set_net_ip_str(snap.net.ip_address.into());
     ui.set_net_ext_ip_str(snap.net.external_ip.into());
-    let net_hist = Rc::new(VecModel::from(snap.net.history));
-    ui.set_net_history(ModelRc::from(net_hist));
+    sync_vec_model(&models.net_history, snap.net.history);
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sync_vec_model_reuses_model_across_grow_shrink_and_updates() {
+        let model = VecModel::default();
+
+        sync_vec_model(&model, vec![1.0, 2.0, 3.0]);
+        assert_eq!(model.row_count(), 3);
+        assert_eq!(model.row_data(1), Some(2.0));
+
+        // Simulate hundreds of steady-state ticks
+        for tick in 0..500 {
+            let v = (tick % 10) as f32;
+            sync_vec_model(&model, vec![v, v + 1.0, v + 2.0]);
+            assert_eq!(model.row_count(), 3);
+        }
+
+        // Grow
+        sync_vec_model(&model, vec![9.0, 8.0, 7.0, 6.0, 5.0]);
+        assert_eq!(model.row_count(), 5);
+        assert_eq!(model.row_data(4), Some(5.0));
+
+        // Shrink
+        sync_vec_model(&model, vec![4.0, 3.0]);
+        assert_eq!(model.row_count(), 2);
+        assert_eq!(model.row_data(0), Some(4.0));
+        assert_eq!(model.row_data(1), Some(3.0));
+    }
 
     #[test]
     fn rotate_log_file_caps_oversized_log() {
