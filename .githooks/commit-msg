@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+COMMIT_MSG_FILE="${1:-}"
+if [ -z "$COMMIT_MSG_FILE" ] || [ ! -f "$COMMIT_MSG_FILE" ]; then
+    echo "commit-msg hook: missing commit message file" >&2
+    exit 1
+fi
+
+# Read the first non-empty, non-comment line (strip CR for Windows/WSL compatibility)
+HEADER=""
+while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    case "$line" in
+        ""|\#*) continue ;;
+        *)
+            HEADER="$line"
+            break
+            ;;
+    esac
+done < "$COMMIT_MSG_FILE"
+
+if [ -z "$HEADER" ]; then
+    echo "ERROR: Empty commit message." >&2
+    exit 1
+fi
+
+# Allow standard git-generated merge/revert headers
+if [[ "$HEADER" =~ ^Merge\  ]] || [[ "$HEADER" =~ ^Revert\ \" ]]; then
+    exit 0
+fi
+
+CONVENTIONAL_REGEX='^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([a-z0-9._/-]+(,[a-z0-9._/-]+)*\))?(!)?: [a-zA-Z0-9].+$'
+
+if [[ ! "$HEADER" =~ $CONVENTIONAL_REGEX ]]; then
+    echo "ERROR: Commit message does not follow Conventional Commits:" >&2
+    echo "  $HEADER" >&2
+    echo "" >&2
+    echo "Expected format: <type>[optional (scope)]: <description>" >&2
+    echo "Allowed types:   feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert" >&2
+    echo "Examples:" >&2
+    echo "  feat(ui): add inline name editing for hardware cards" >&2
+    echo "  fix(telemetry): correct UTF-8 degree symbol in temperature output" >&2
+    exit 1
+fi
+
+if [ "${#HEADER}" -gt 100 ]; then
+    echo "ERROR: Commit header exceeds 100 characters (${#HEADER} chars):" >&2
+    echo "  $HEADER" >&2
+    exit 1
+fi
