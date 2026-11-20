@@ -894,6 +894,13 @@ fn find_main_hwnd() -> Option<windows::Win32::Foundation::HWND> {
     }
 }
 
+fn format_temp_c(temp: Option<f32>) -> (f32, String) {
+    match temp {
+        Some(t) => (t, format!("{:.0}°C", t)),
+        None => (0.0, "--°C".to_string()),
+    }
+}
+
 fn apply_snapshot(ui: &AppWindow, snap: TelemetrySnapshot) {
     ui.set_hostname(snap.hostname.into());
     ui.set_uptime_str(snap.uptime.into());
@@ -902,14 +909,10 @@ fn apply_snapshot(ui: &AppWindow, snap: TelemetrySnapshot) {
     ui.set_cpu_name(snap.cpu.name.into());
     ui.set_cpu_usage(snap.cpu.total_usage);
     ui.set_cpu_usage_str(format!("{:.0}%", snap.cpu.total_usage * 100.0).into());
-    ui.set_cpu_clock_str(format!("{:.2} GHz", snap.cpu.clock_ghz).into());
-    if let Some(temp) = snap.cpu.temperature_c {
-        ui.set_cpu_temp_val(temp);
-        ui.set_cpu_temp_str(format!("{:.0} Â°C", temp).into());
-    } else {
-        ui.set_cpu_temp_val(0.0);
-        ui.set_cpu_temp_str("-- Â°C".into());
-    }
+    ui.set_cpu_clock_str(format!("{:.1} GHz", snap.cpu.clock_ghz).into());
+    let (cpu_temp_val, cpu_temp_str) = format_temp_c(snap.cpu.temperature_c);
+    ui.set_cpu_temp_val(cpu_temp_val);
+    ui.set_cpu_temp_str(cpu_temp_str.into());
     let cpu_hist = Rc::new(VecModel::from(snap.cpu.history));
     ui.set_cpu_history(ModelRc::from(cpu_hist));
 
@@ -930,13 +933,9 @@ fn apply_snapshot(ui: &AppWindow, snap: TelemetrySnapshot) {
         ui.set_gpu_name(snap.gpu.name.into());
         ui.set_gpu_usage(snap.gpu.usage);
         ui.set_gpu_usage_str(format!("{:.0}%", snap.gpu.usage * 100.0).into());
-        if let Some(temp) = snap.gpu.temperature_c {
-            ui.set_gpu_temp_val(temp);
-            ui.set_gpu_temp_str(format!("{:.0} Â°C", temp).into());
-        } else {
-            ui.set_gpu_temp_val(0.0);
-            ui.set_gpu_temp_str("-- Â°C".into());
-        }
+        let (gpu_temp_val, gpu_temp_str) = format_temp_c(snap.gpu.temperature_c);
+        ui.set_gpu_temp_val(gpu_temp_val);
+        ui.set_gpu_temp_str(gpu_temp_str.into());
         ui.set_gpu_vram_str(format!("{:.1} / {:.1} GB", snap.gpu.vram_used_gb, snap.gpu.vram_total_gb).into());
         if let Some(fan) = snap.gpu.fan_rpm {
             ui.set_gpu_fan_str(format!("{} RPM", fan).into());
