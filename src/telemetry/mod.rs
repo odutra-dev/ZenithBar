@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 use std::time::Instant;
-use sysinfo::{Components, Disks, Networks, System};
+use sysinfo::{Components, CpuRefreshKind, Disks, MemoryRefreshKind, Networks, RefreshKind, System};
 
 const HISTORY_SIZE: usize = 12;
 
@@ -92,9 +92,13 @@ pub struct TelemetryEngine {
 
 impl TelemetryEngine {
     pub fn new() -> Self {
-        let mut sys = System::new_all()
-            .or_else(|_| System::new())
-            .unwrap_or_else(|_| System::new_with_specifics(sysinfo::RefreshKind::nothing()).unwrap());
+        let mut sys = System::new_with_specifics(
+            RefreshKind::nothing()
+                .with_cpu(CpuRefreshKind::everything())
+                .with_memory(MemoryRefreshKind::everything()),
+        )
+        .or_else(|_| System::new())
+        .unwrap();
         sys.refresh_cpu_all();
         sys.refresh_memory();
 
@@ -599,4 +603,31 @@ fn fetch_external_ip() -> String {
         }
     }
     String::from("--")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn telemetry_engine_avoids_process_list_and_bounds_histories() {
+        let mut engine = TelemetryEngine::new();
+        assert!(
+            engine.sys.processes().is_empty(),
+            "System should not allocate OS process table"
+        );
+
+        // Pre-seed external IP and disable nvidia-smi probing to keep test deterministic and fast
+        engine.external_ip = "127.0.0.1".to_string();
+        engine.last_ext_ip_check = Instant::now();
+        engine.nvidia_smi_available = Some(false);
+
+        for _ in 0..500 {
+            let snap = engine.snapshot();
+            assert_eq!(snap.cpu.history.len(), HISTORY_SIZE);
+            assert_eq!(snap.mem.history.len(), HISTORY_SIZE);
+            assert_eq!(snap.gpu.history.len(), HISTORY_SIZE);
+            assert_eq!(snap.net.history.len(), HISTORY_SIZE);
+        }
+    }
 }
