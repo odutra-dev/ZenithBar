@@ -67,6 +67,7 @@ fn apply_locale_to_app(ui: &AppWindow, s: &i18n::I18nStrings) {
     ui.set_i18n_clock(s.clock.clone().into());
     ui.set_i18n_temp(s.temp.clone().into());
     ui.set_i18n_usage_per_core(s.usage_per_core.clone().into());
+    ui.set_i18n_usage(s.usage.clone().into());
     ui.set_i18n_fan(s.fan.clone().into());
     ui.set_i18n_local_ip(s.local_ip.clone().into());
     ui.set_i18n_wan_ip(s.wan_ip.clone().into());
@@ -466,8 +467,58 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let appbar_holder: Rc<RefCell<Option<AppBarManager>>> = Rc::new(RefCell::new(None));
     let tray_holder: Rc<RefCell<Option<TrayIcon>>> = Rc::new(RefCell::new(None));
 
-    // Estado de visibilidade
+    // Estado de visibilidade e nomes detectados para fallback ao limpar nome customizado
     let is_visible = Rc::new(RefCell::new(!config.borrow().initially_hidden));
+    let detected_names = Rc::new(RefCell::new(DetectedNames::default()));
+
+    // Callbacks para edição inline dos nomes de hardware/sistema
+    {
+        #[derive(Clone, Copy)]
+        enum NameTarget { Hostname, Cpu, Gpu, Net }
+
+        let register_name_cb = |target: NameTarget| {
+            let ui_w = ui.as_weak();
+            let cfg_c = config.clone();
+            let det_c = detected_names.clone();
+            move |new_val: slint::SharedString| {
+                let trimmed = new_val.trim().to_string();
+                let mut cfg = cfg_c.borrow_mut();
+                let det = det_c.borrow();
+                let display = match target {
+                    NameTarget::Hostname => {
+                        cfg.custom_hostname = trimmed.clone();
+                        if trimmed.is_empty() { det.hostname.clone() } else { trimmed }
+                    }
+                    NameTarget::Cpu => {
+                        cfg.custom_cpu_name = trimmed.clone();
+                        if trimmed.is_empty() { det.cpu.clone() } else { trimmed }
+                    }
+                    NameTarget::Gpu => {
+                        cfg.custom_gpu_name = trimmed.clone();
+                        if trimmed.is_empty() { det.gpu.clone() } else { trimmed }
+                    }
+                    NameTarget::Net => {
+                        cfg.custom_net_name = trimmed.clone();
+                        if trimmed.is_empty() { det.net.clone() } else { trimmed }
+                    }
+                };
+                let _ = cfg.save();
+                if let Some(ui) = ui_w.upgrade() {
+                    match target {
+                        NameTarget::Hostname => ui.set_hostname(display.into()),
+                        NameTarget::Cpu => ui.set_cpu_name(display.into()),
+                        NameTarget::Gpu => ui.set_gpu_name(display.into()),
+                        NameTarget::Net => ui.set_net_adapter_name(display.into()),
+                    }
+                }
+            }
+        };
+
+        ui.on_request_set_custom_hostname(register_name_cb(NameTarget::Hostname));
+        ui.on_request_set_custom_cpu_name(register_name_cb(NameTarget::Cpu));
+        ui.on_request_set_custom_gpu_name(register_name_cb(NameTarget::Gpu));
+        ui.on_request_set_custom_net_name(register_name_cb(NameTarget::Net));
+    }
 
     // Callbacks da UI Principal
     let ui_weak = ui.as_weak();
@@ -601,6 +652,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let settings_weak_timer = settings_ui.as_weak();
     let rx_ref = Rc::new(RefCell::new(rx));
     let config_poll = config.clone();
+    let detected_poll = detected_names.clone();
     let is_vis_clone = is_visible.clone();
     let appbar_tray = appbar_holder.clone();
     let monitors_tray_count = monitors.len();
@@ -698,7 +750,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 if let Ok(rx_guard) = rx_ref.try_borrow() {
                     while let Ok(snap) = rx_guard.try_recv() {
-                        apply_snapshot(&ui, snap);
+                        apply_snapshot(&ui, snap, &cfg, &detected_poll);
                     }
                 }
             }
@@ -894,6 +946,22 @@ fn find_main_hwnd() -> Option<windows::Win32::Foundation::HWND> {
     }
 }
 
+#[derive(Default)]
+struct DetectedNames {
+    hostname: String,
+    cpu: String,
+    gpu: String,
+    net: String,
+}
+
+fn resolve_display_name(custom: &str, detected: &str) -> String {
+    if custom.trim().is_empty() {
+        detected.to_string()
+    } else {
+        custom.trim().to_string()
+    }
+}
+
 fn format_temp_c(temp: Option<f32>) -> (f32, String) {
     match temp {
         Some(t) => (t, format!("{:.0}°C", t)),
@@ -901,12 +969,25 @@ fn format_temp_c(temp: Option<f32>) -> (f32, String) {
     }
 }
 
-fn apply_snapshot(ui: &AppWindow, snap: TelemetrySnapshot) {
-    ui.set_hostname(snap.hostname.into());
+fn apply_snapshot(
+    ui: &AppWindow,
+    snap: TelemetrySnapshot,
+    cfg: &AppConfig,
+    detected_names: &Rc<RefCell<DetectedNames>>,
+) {
+    {
+        let mut det = detected_names.borrow_mut();
+        det.hostname = snap.hostname.clone();
+        det.cpu = snap.cpu.name.clone();
+        det.gpu = snap.gpu.name.clone();
+        det.net = snap.net.adapter_name.clone();
+    }
+
+    ui.set_hostname(resolve_display_name(&cfg.custom_hostname, &snap.hostname).into());
     ui.set_uptime_str(snap.uptime.into());
 
     // CPU
-    ui.set_cpu_name(snap.cpu.name.into());
+    ui.set_cpu_name(resolve_display_name(&cfg.custom_cpu_name, &snap.cpu.name).into());
     ui.set_cpu_usage(snap.cpu.total_usage);
     ui.set_cpu_usage_str(format!("{:.0}%", snap.cpu.total_usage * 100.0).into());
     ui.set_cpu_clock_str(format!("{:.1} GHz", snap.cpu.clock_ghz).into());
@@ -930,7 +1011,7 @@ fn apply_snapshot(ui: &AppWindow, snap: TelemetrySnapshot) {
     // GPU
     ui.set_gpu_detected(snap.gpu.detected);
     if snap.gpu.detected {
-        ui.set_gpu_name(snap.gpu.name.into());
+        ui.set_gpu_name(resolve_display_name(&cfg.custom_gpu_name, &snap.gpu.name).into());
         let gpu_usage_val = snap.gpu.usage.unwrap_or(0.0);
         ui.set_gpu_usage(gpu_usage_val);
         ui.set_gpu_usage_str(
@@ -1008,7 +1089,7 @@ fn apply_snapshot(ui: &AppWindow, snap: TelemetrySnapshot) {
     ui.set_disks_list(ModelRc::from(disks_model));
 
     // Network
-    ui.set_net_adapter_name(snap.net.adapter_name.into());
+    ui.set_net_adapter_name(resolve_display_name(&cfg.custom_net_name, &snap.net.adapter_name).into());
     ui.set_net_download_str(format!("{:.1} Mbps", snap.net.download_mbps).into());
     ui.set_net_upload_str(format!("{:.1} Mbps", snap.net.upload_mbps).into());
     ui.set_net_ip_str(snap.net.ip_address.into());
