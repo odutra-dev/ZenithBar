@@ -931,17 +931,40 @@ fn apply_snapshot(ui: &AppWindow, snap: TelemetrySnapshot) {
     ui.set_gpu_detected(snap.gpu.detected);
     if snap.gpu.detected {
         ui.set_gpu_name(snap.gpu.name.into());
-        ui.set_gpu_usage(snap.gpu.usage);
-        ui.set_gpu_usage_str(format!("{:.0}%", snap.gpu.usage * 100.0).into());
+        let gpu_usage_val = snap.gpu.usage.unwrap_or(0.0);
+        ui.set_gpu_usage(gpu_usage_val);
+        ui.set_gpu_usage_str(
+            snap.gpu
+                .usage
+                .map(|u| format!("{:.0}%", u * 100.0))
+                .unwrap_or_else(|| "--%".to_string())
+                .into(),
+        );
+        ui.set_gpu_clock_str(
+            snap.gpu
+                .clock_ghz
+                .map(|c| format!("{:.1} GHz", c))
+                .unwrap_or_else(|| "-- GHz".to_string())
+                .into(),
+        );
         let (gpu_temp_val, gpu_temp_str) = format_temp_c(snap.gpu.temperature_c);
         ui.set_gpu_temp_val(gpu_temp_val);
         ui.set_gpu_temp_str(gpu_temp_str.into());
         ui.set_gpu_vram_str(format!("{:.1} / {:.1} GB", snap.gpu.vram_used_gb, snap.gpu.vram_total_gb).into());
-        if let Some(fan) = snap.gpu.fan_rpm {
-            ui.set_gpu_fan_str(format!("{} RPM", fan).into());
-        } else {
-            ui.set_gpu_fan_str(String::new().into());
-        }
+        ui.set_gpu_vram_pct_str(
+            snap.gpu
+                .vram_percent
+                .map(|p| format!("{:.0}%", p * 100.0))
+                .unwrap_or_else(|| "--%".to_string())
+                .into(),
+        );
+        ui.set_gpu_fan_pct_str(
+            snap.gpu
+                .fan_percent
+                .map(|p| format!("{:.0}%", p * 100.0))
+                .unwrap_or_else(|| "--%".to_string())
+                .into(),
+        );
         let gpu_hist = Rc::new(VecModel::from(snap.gpu.history));
         ui.set_gpu_history(ModelRc::from(gpu_hist));
     }

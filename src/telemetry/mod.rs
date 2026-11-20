@@ -27,11 +27,13 @@ pub struct MemorySnapshot {
 pub struct GpuSnapshot {
     pub detected: bool,
     pub name: String,
-    pub usage: f32, // 0.0 .. 1.0
+    pub usage: Option<f32>, // 0.0 .. 1.0
+    pub clock_ghz: Option<f32>,
     pub vram_used_gb: f64,
     pub vram_total_gb: f64,
+    pub vram_percent: Option<f32>, // 0.0 .. 1.0
     pub temperature_c: Option<f32>,
-    pub fan_rpm: Option<u32>,
+    pub fan_percent: Option<f32>, // 0.0 .. 1.0
     pub history: Vec<f32>,
 }
 
@@ -84,6 +86,8 @@ pub struct TelemetryEngine {
     ram_history: VecDeque<f32>,
     gpu_history: VecDeque<f32>,
     net_history: VecDeque<f32>,
+
+    nvidia_smi_available: Option<bool>,
 }
 
 impl TelemetryEngine {
@@ -135,6 +139,7 @@ impl TelemetryEngine {
             ram_history,
             gpu_history,
             net_history,
+            nvidia_smi_available: None,
         }
     }
 
@@ -326,34 +331,250 @@ impl TelemetryEngine {
     }
 
     pub fn sample_gpu(&mut self) -> GpuSnapshot {
-        let usage = 0.15;
-        let mut temp = Some(48.0);
-        let name = String::from("GPU do Sistema");
+        let mut name = String::from("GPU do Sistema");
+        let mut usage: Option<f32> = None;
+        let mut clock_ghz: Option<f32> = None;
+        let mut vram_used_gb = 0.0;
+        let mut vram_total_gb = 0.0;
+        let mut vram_percent: Option<f32> = None;
+        let mut temp: Option<f32> = None;
+        let mut fan_percent: Option<f32> = None;
 
-        for comp in &self.components {
-            let label = comp.label().to_lowercase();
-            if label.contains("gpu") || label.contains("graphics") {
-                if let Some(t) = comp.temperature() {
-                    temp = Some(t);
-                    break;
+        if self.nvidia_smi_available != Some(false) {
+            if let Some(nv) = query_nvidia_smi(&mut self.nvidia_smi_available) {
+                if !nv.name.is_empty() {
+                    name = nv.name;
+                }
+                usage = nv.usage;
+                clock_ghz = nv.clock_ghz;
+                vram_used_gb = nv.vram_used_gb;
+                vram_total_gb = nv.vram_total_gb;
+                vram_percent = nv.vram_percent;
+                temp = nv.temperature_c;
+                fan_percent = nv.fan_percent;
+            }
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        if usage.is_none() && temp.is_none() && clock_ghz.is_none() {
+            if let Some(sysfs_gpu) = query_linux_drm_gpu() {
+                if usage.is_none() {
+                    usage = sysfs_gpu.usage;
+                }
+                if clock_ghz.is_none() {
+                    clock_ghz = sysfs_gpu.clock_ghz;
+                }
+                if vram_percent.is_none() {
+                    vram_used_gb = sysfs_gpu.vram_used_gb;
+                    vram_total_gb = sysfs_gpu.vram_total_gb;
+                    vram_percent = sysfs_gpu.vram_percent;
+                }
+                if temp.is_none() {
+                    temp = sysfs_gpu.temperature_c;
+                }
+                if fan_percent.is_none() {
+                    fan_percent = sysfs_gpu.fan_percent;
                 }
             }
         }
 
+        if temp.is_none() {
+            for comp in &self.components {
+                let label = comp.label().to_lowercase();
+                if label.contains("gpu") || label.contains("graphics") || label.contains("amdgpu") {
+                    if let Some(t) = comp.temperature() {
+                        temp = Some(t);
+                        break;
+                    }
+                }
+            }
+        }
+
+        let hist_val = usage.unwrap_or(0.0).clamp(0.0, 1.0);
         self.gpu_history.pop_front();
-        self.gpu_history.push_back(usage);
+        self.gpu_history.push_back(hist_val);
 
         GpuSnapshot {
             detected: true,
             name,
             usage,
-            vram_used_gb: 2.4,
-            vram_total_gb: 8.0,
+            clock_ghz,
+            vram_used_gb,
+            vram_total_gb,
+            vram_percent,
             temperature_c: temp,
-            fan_rpm: Some(1100),
+            fan_percent,
             history: self.gpu_history.iter().copied().collect(),
         }
     }
+}
+
+struct RawGpuTelemetry {
+    name: String,
+    usage: Option<f32>,
+    clock_ghz: Option<f32>,
+    vram_used_gb: f64,
+    vram_total_gb: f64,
+    vram_percent: Option<f32>,
+    temperature_c: Option<f32>,
+    fan_percent: Option<f32>,
+}
+
+fn parse_optional_f32(s: &str) -> Option<f32> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() || trimmed.starts_with('[') || trimmed.eq_ignore_ascii_case("n/a") {
+        return None;
+    }
+    trimmed.parse::<f32>().ok()
+}
+
+fn query_nvidia_smi(available_cache: &mut Option<bool>) -> Option<RawGpuTelemetry> {
+    let mut cmd = std::process::Command::new("nvidia-smi");
+    cmd.args([
+        "--query-gpu=name,utilization.gpu,clocks.current.graphics,memory.used,memory.total,temperature.gpu,fan.speed",
+        "--format=csv,noheader,nounits",
+    ]);
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let output = match cmd.output() {
+        Ok(out) => {
+            if !out.status.success() {
+                if available_cache.is_none() {
+                    *available_cache = Some(false);
+                }
+                return None;
+            }
+            *available_cache = Some(true);
+            out
+        }
+        Err(err) => {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                *available_cache = Some(false);
+            }
+            return None;
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let line = stdout.lines().next()?.trim();
+    if line.is_empty() {
+        return None;
+    }
+
+    let cols: Vec<&str> = line.split(',').collect();
+    if cols.len() < 7 {
+        return None;
+    }
+
+    let name = cols[0].trim().to_string();
+    let usage = parse_optional_f32(cols[1]).map(|v| (v / 100.0).clamp(0.0, 1.0));
+    let clock_ghz = parse_optional_f32(cols[2]).map(|mhz| mhz / 1000.0);
+    let vram_used_mib = parse_optional_f32(cols[3]).map(|v| v as f64).unwrap_or(0.0);
+    let vram_total_mib = parse_optional_f32(cols[4]).map(|v| v as f64).unwrap_or(0.0);
+    let vram_used_gb = vram_used_mib / 1024.0;
+    let vram_total_gb = vram_total_mib / 1024.0;
+    let vram_percent = if vram_total_mib > 0.0 {
+        Some((vram_used_mib / vram_total_mib) as f32)
+    } else {
+        None
+    };
+    let temperature_c = parse_optional_f32(cols[5]);
+    let fan_percent = parse_optional_f32(cols[6]).map(|v| (v / 100.0).clamp(0.0, 1.0));
+
+    Some(RawGpuTelemetry {
+        name,
+        usage,
+        clock_ghz,
+        vram_used_gb,
+        vram_total_gb,
+        vram_percent,
+        temperature_c,
+        fan_percent,
+    })
+}
+
+#[cfg(not(target_os = "windows"))]
+fn query_linux_drm_gpu() -> Option<RawGpuTelemetry> {
+    let entries = std::fs::read_dir("/sys/class/drm").ok()?;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if !name.starts_with("card") || name.contains('-') {
+            continue;
+        }
+        let dev_path = entry.path().join("device");
+        if !dev_path.exists() {
+            continue;
+        }
+
+        let usage = std::fs::read_to_string(dev_path.join("gpu_busy_percent"))
+            .ok()
+            .and_then(|s| s.trim().parse::<f32>().ok())
+            .map(|v| (v / 100.0).clamp(0.0, 1.0));
+
+        let vram_used_bytes = std::fs::read_to_string(dev_path.join("mem_info_vram_used"))
+            .ok()
+            .and_then(|s| s.trim().parse::<f64>().ok());
+        let vram_total_bytes = std::fs::read_to_string(dev_path.join("mem_info_vram_total"))
+            .ok()
+            .and_then(|s| s.trim().parse::<f64>().ok());
+
+        let (vram_used_gb, vram_total_gb, vram_percent) = match (vram_used_bytes, vram_total_bytes) {
+            (Some(u), Some(t)) if t > 0.0 => (
+                u / (1024.0 * 1024.0 * 1024.0),
+                t / (1024.0 * 1024.0 * 1024.0),
+                Some((u / t) as f32),
+            ),
+            _ => (0.0, 0.0, None),
+        };
+
+        let mut temperature_c = None;
+        let mut clock_ghz = None;
+        let mut fan_percent = None;
+
+        if let Ok(hwmons) = std::fs::read_dir(dev_path.join("hwmon")) {
+            for hw in hwmons.flatten() {
+                let hp = hw.path();
+                if temperature_c.is_none() {
+                    temperature_c = std::fs::read_to_string(hp.join("temp1_input"))
+                        .ok()
+                        .and_then(|s| s.trim().parse::<f32>().ok())
+                        .map(|mc| mc / 1000.0);
+                }
+                if clock_ghz.is_none() {
+                    clock_ghz = std::fs::read_to_string(hp.join("freq1_input"))
+                        .ok()
+                        .and_then(|s| s.trim().parse::<f32>().ok())
+                        .map(|hz| hz / 1_000_000_000.0);
+                }
+                if fan_percent.is_none() {
+                    fan_percent = std::fs::read_to_string(hp.join("pwm1"))
+                        .ok()
+                        .and_then(|s| s.trim().parse::<f32>().ok())
+                        .map(|pwm| (pwm / 255.0).clamp(0.0, 1.0));
+                }
+            }
+        }
+
+        if usage.is_some() || temperature_c.is_some() || vram_percent.is_some() || clock_ghz.is_some() {
+            return Some(RawGpuTelemetry {
+                name: String::new(),
+                usage,
+                clock_ghz,
+                vram_used_gb,
+                vram_total_gb,
+                vram_percent,
+                temperature_c,
+                fan_percent,
+            });
+        }
+    }
+    None
 }
 
 fn fetch_external_ip() -> String {
