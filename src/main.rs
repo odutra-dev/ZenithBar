@@ -5,6 +5,7 @@ mod config;
 mod dwm;
 mod i18n;
 mod monitor;
+mod single_instance;
 mod telemetry;
 mod tray;
 mod updater;
@@ -351,6 +352,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }));
 
     rotate_log_file(std::path::Path::new("zenithbar.log"), MAX_LOG_BYTES);
+
+    let wait_timeout = if std::env::args().any(|a| a == "--restarted") {
+        Duration::from_secs(3)
+    } else {
+        Duration::ZERO
+    };
+    let _instance_guard = match single_instance::SingleInstanceGuard::acquire(wait_timeout) {
+        Some(guard) => guard,
+        None => {
+            log_msg("Outra instância do ZenithBar já está em execução. Encerrando nova instância.");
+            return Ok(());
+        }
+    };
+
     log_msg("--- ZenithBar Iniciando ---");
 
     log_msg("1. Carregando configuraÃ§Ãµes 1:1...");
@@ -742,6 +757,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if let Ok(ab_guard) = appbar_tray.try_borrow() {
                             if let Some(ab) = ab_guard.as_ref() {
                                 ab.update_position();
+                            }
+                        }
+                    }
+
+                    if events.show_window {
+                        if let Some(ui) = ui_weak_timer.upgrade() {
+                            if let Ok(mut ab_guard) = appbar_tray.try_borrow_mut() {
+                                appbar_show(&ui, &mut ab_guard, &is_vis_clone);
                             }
                         }
                     }
