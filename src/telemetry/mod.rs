@@ -2,6 +2,9 @@ use std::collections::VecDeque;
 use std::time::Instant;
 use sysinfo::{Components, CpuRefreshKind, Disks, MemoryRefreshKind, Networks, RefreshKind, System};
 
+#[cfg(target_os = "windows")]
+mod gpu_win;
+
 const HISTORY_SIZE: usize = 12;
 
 #[derive(Debug, Clone)]
@@ -88,6 +91,8 @@ pub struct TelemetryEngine {
     net_history: VecDeque<f32>,
 
     nvidia_smi_available: Option<bool>,
+    #[cfg(target_os = "windows")]
+    win_gpu: gpu_win::WindowsGpuMonitor,
 }
 
 impl TelemetryEngine {
@@ -144,6 +149,8 @@ impl TelemetryEngine {
             gpu_history,
             net_history,
             nvidia_smi_available: None,
+            #[cfg(target_os = "windows")]
+            win_gpu: gpu_win::WindowsGpuMonitor::new(),
         }
     }
 
@@ -344,18 +351,44 @@ impl TelemetryEngine {
         let mut temp: Option<f32> = None;
         let mut fan_percent: Option<f32> = None;
 
-        if self.nvidia_smi_available != Some(false) {
+        #[cfg(target_os = "windows")]
+        if let Some(win_sample) = self.win_gpu.sample() {
+            if !win_sample.name.is_empty() {
+                name = win_sample.name;
+            }
+            usage = win_sample.usage;
+            clock_ghz = win_sample.clock_ghz;
+            vram_used_gb = win_sample.vram_used_gb;
+            vram_total_gb = win_sample.vram_total_gb;
+            vram_percent = win_sample.vram_percent;
+            temp = win_sample.temperature_c;
+            fan_percent = win_sample.fan_percent;
+        }
+
+        // Fallback to nvidia-smi CLI if Windows NVML/ADL or Linux didn't fill full NVIDIA telemetry
+        let needs_nvidia_cli = temp.is_none() || clock_ghz.is_none() || usage.is_none();
+        if needs_nvidia_cli && self.nvidia_smi_available != Some(false) {
             if let Some(nv) = query_nvidia_smi(&mut self.nvidia_smi_available) {
-                if !nv.name.is_empty() {
+                if !nv.name.is_empty() && name == "GPU do Sistema" {
                     name = nv.name;
                 }
-                usage = nv.usage;
-                clock_ghz = nv.clock_ghz;
-                vram_used_gb = nv.vram_used_gb;
-                vram_total_gb = nv.vram_total_gb;
-                vram_percent = nv.vram_percent;
-                temp = nv.temperature_c;
-                fan_percent = nv.fan_percent;
+                if usage.is_none() {
+                    usage = nv.usage;
+                }
+                if clock_ghz.is_none() {
+                    clock_ghz = nv.clock_ghz;
+                }
+                if vram_percent.is_none() {
+                    vram_used_gb = nv.vram_used_gb;
+                    vram_total_gb = nv.vram_total_gb;
+                    vram_percent = nv.vram_percent;
+                }
+                if temp.is_none() {
+                    temp = nv.temperature_c;
+                }
+                if fan_percent.is_none() {
+                    fan_percent = nv.fan_percent;
+                }
             }
         }
 
@@ -432,8 +465,23 @@ fn parse_optional_f32(s: &str) -> Option<f32> {
     trimmed.parse::<f32>().ok()
 }
 
+fn nvidia_smi_executable() -> &'static str {
+    #[cfg(target_os = "windows")]
+    {
+        for candidate in [
+            "C:\\Windows\\System32\\nvidia-smi.exe",
+            "C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe",
+        ] {
+            if std::path::Path::new(candidate).is_file() {
+                return candidate;
+            }
+        }
+    }
+    "nvidia-smi"
+}
+
 fn query_nvidia_smi(available_cache: &mut Option<bool>) -> Option<RawGpuTelemetry> {
-    let mut cmd = std::process::Command::new("nvidia-smi");
+    let mut cmd = std::process::Command::new(nvidia_smi_executable());
     cmd.args([
         "--query-gpu=name,utilization.gpu,clocks.current.graphics,memory.used,memory.total,temperature.gpu,fan.speed",
         "--format=csv,noheader,nounits",
