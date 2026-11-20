@@ -56,6 +56,130 @@ component ProgressBar inherits Rectangle {
     }
 }
 
+component EditableLabel inherits Rectangle {
+    in property <string> text: "";
+    in property <length> font_size: 10px;
+    in property <int> font_weight: 400;
+    in property <color> text_color: #94a3b8;
+    in property <color> accent_color: #38bdf8;
+    callback committed(string);
+
+    private property <bool> editing: false;
+    private property <string> draft_text: "";
+    vertical-stretch: 0;
+    border-radius: 4px;
+    background: root.editing ? #0f172a : (ta.has-hover ? #ffffff0a : transparent);
+    border-width: root.editing ? 1px : 0px;
+    border-color: root.editing ? root.accent_color : transparent;
+
+    ta := TouchArea {
+        enabled: !root.editing;
+        mouse-cursor: root.editing ? default : pointer;
+        clicked => {
+            root.draft_text = root.text;
+            root.editing = true;
+        }
+    }
+
+    if !root.editing : HorizontalLayout {
+        padding-left: 2px;
+        padding-right: 2px;
+        padding-top: 1px;
+        padding-bottom: 1px;
+        spacing: 4px;
+
+        Text {
+            text: root.text;
+            font-size: root.font_size;
+            font-weight: root.font_weight;
+            color: ta.has-hover ? #f1f5f9 : root.text_color;
+            wrap: word-wrap;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+        }
+
+        if ta.has-hover : Text {
+            text: "✎";
+            font-size: 9px;
+            color: root.accent_color;
+            vertical-alignment: center;
+        }
+    }
+
+    if root.editing : HorizontalLayout {
+        padding-left: 4px;
+        padding-right: 4px;
+        padding-top: 2px;
+        padding-bottom: 2px;
+        spacing: 4px;
+
+        edit_input := TextInput {
+            text <=> root.draft_text;
+            font-size: root.font_size;
+            font-weight: root.font_weight;
+            color: #f8fafc;
+            single-line: true;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+            init => {
+                self.focus();
+            }
+            accepted => {
+                root.editing = false;
+                root.committed(root.draft_text);
+            }
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    root.editing = false;
+                    return accept;
+                }
+                return reject;
+            }
+        }
+
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            background: ok_ta.has-hover ? #10b98140 : #ffffff12;
+            Text {
+                text: "✓";
+                font-size: 9px;
+                color: #34d399;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            ok_ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.editing = false;
+                    root.committed(root.draft_text);
+                }
+            }
+        }
+
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            background: cancel_ta.has-hover ? #ef444440 : #ffffff12;
+            Text {
+                text: "✕";
+                font-size: 9px;
+                color: #f87171;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+            cancel_ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.editing = false;
+                }
+            }
+        }
+    }
+}
+
 component MetricSection inherits Rectangle {
     in property <string> title: "SECTION";
     in property <image> icon_source;
@@ -133,6 +257,10 @@ export component AppWindow inherits Window {
     callback request_open_settings();
     callback request_next_disk();
     callback request_quit();
+    callback request_set_custom_hostname(string);
+    callback request_set_custom_cpu_name(string);
+    callback request_set_custom_gpu_name(string);
+    callback request_set_custom_net_name(string);
 
     // Dynamic sizing & opacity
     in-out property <float> sidebar_width_px: 300;
@@ -229,7 +357,7 @@ export component AppWindow inherits Window {
             border-radius: 8px;
             border-width: 1px;
             border-color: #ffffff10;
-            height: 60px;
+            min-height: 60px;
 
             HorizontalLayout {
                 padding: 8px;
@@ -247,16 +375,16 @@ export component AppWindow inherits Window {
                             font-size: root.sidebar_width_px < 220 ? 15px : 18px;
                             font-weight: 800;
                             color: #ffffff;
-                        }
-                        Text {
-                            text: root.hostname;
-                            font-size: root.sidebar_width_px < 220 ? 9px : 10px;
-                            font-weight: 600;
-                            color: #38bdf8;
                             vertical-alignment: center;
-                            overflow: elide;
+                        }
+                        if root.show_machine_name : EditableLabel {
+                            text: root.hostname;
+                            font_size: root.sidebar_width_px < 220 ? 9px : 10px;
+                            font_weight: 600;
+                            text_color: #38bdf8;
+                            accent_color: #38bdf8;
                             horizontal-stretch: 1;
-                            visible: root.show_machine_name;
+                            committed(val) => { root.request_set_custom_hostname(val); }
                         }
                     }
 
@@ -364,11 +492,12 @@ export component AppWindow inherits Window {
                     alert_active: root.cpu_usage > 0.85 || root.cpu_temp_val > 80.0;
                     badge: root.cpu_usage_str;
 
-                    Text {
+                    EditableLabel {
                         text: root.cpu_name;
-                        font-size: 10px;
-                        color: #94a3b8;
-                        overflow: elide;
+                        font_size: 10px;
+                        text_color: #94a3b8;
+                        accent_color: #38bdf8;
+                        committed(val) => { root.request_set_custom_cpu_name(val); }
                     }
 
                     ProgressBar {
@@ -478,11 +607,12 @@ export component AppWindow inherits Window {
                     alert_active: root.gpu_usage > 0.85 || root.gpu_temp_val > 80.0;
                     badge: root.gpu_usage_str;
 
-                    Text {
+                    EditableLabel {
                         text: root.gpu_name;
-                        font-size: 10px;
-                        color: #94a3b8;
-                        overflow: elide;
+                        font_size: 10px;
+                        text_color: #94a3b8;
+                        accent_color: #10b981;
+                        committed(val) => { root.request_set_custom_gpu_name(val); }
                     }
 
                     ProgressBar {
