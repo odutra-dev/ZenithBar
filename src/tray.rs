@@ -6,6 +6,7 @@ pub struct TrayEvents {
     pub cycle_screen: bool,
     pub reload_sensors: bool,
     pub update_pos: bool,
+    pub show_window: bool,
     pub exit: bool,
 }
 
@@ -30,6 +31,7 @@ pub mod win32 {
     };
 
     pub const WM_APPBAR_CALLBACK: u32 = WM_USER + 102;
+    pub const WM_SHOW_EXISTING_INSTANCE: u32 = WM_USER + 103;
     pub const ABN_POSCHANGED: usize = 1;
     pub const ABN_FULLSCREENAPP: usize = 2;
 
@@ -56,6 +58,7 @@ pub mod win32 {
     static SHOULD_CYCLE_SCREEN: AtomicBool = AtomicBool::new(false);
     static SHOULD_RELOAD_SENSORS: AtomicBool = AtomicBool::new(false);
     static SHOULD_UPDATE_POS: AtomicBool = AtomicBool::new(false);
+    static SHOULD_SHOW_WINDOW: AtomicBool = AtomicBool::new(false);
     static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
     static IS_ALWAYS_TOP: AtomicBool = AtomicBool::new(true);
     static TRAY_CULTURE: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
@@ -161,6 +164,7 @@ pub mod win32 {
                 cycle_screen: SHOULD_CYCLE_SCREEN.swap(false, Ordering::SeqCst),
                 reload_sensors: SHOULD_RELOAD_SENSORS.swap(false, Ordering::SeqCst),
                 update_pos: SHOULD_UPDATE_POS.swap(false, Ordering::SeqCst),
+                show_window: SHOULD_SHOW_WINDOW.swap(false, Ordering::SeqCst),
                 exit: SHOULD_EXIT.swap(false, Ordering::SeqCst),
             }
         }
@@ -200,6 +204,11 @@ pub mod win32 {
     ) -> LRESULT {
         if msg == WM_HOTKEY {
             SHOULD_TOGGLE_VISIBILITY.store(true, Ordering::SeqCst);
+            return LRESULT(0);
+        }
+
+        if msg == WM_SHOW_EXISTING_INSTANCE {
+            SHOULD_SHOW_WINDOW.store(true, Ordering::SeqCst);
             return LRESULT(0);
         }
 
@@ -364,6 +373,7 @@ pub mod win32 {
     pub static SHOULD_CYCLE_SCREEN: AtomicBool = AtomicBool::new(false);
     pub static SHOULD_RELOAD_SENSORS: AtomicBool = AtomicBool::new(false);
     pub static SHOULD_UPDATE_POS: AtomicBool = AtomicBool::new(false);
+    pub static SHOULD_SHOW_WINDOW: AtomicBool = AtomicBool::new(false);
     pub static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
 
     pub fn set_always_top_state(_always_top: bool) {}
@@ -389,6 +399,7 @@ pub mod win32 {
                 cycle_screen: SHOULD_CYCLE_SCREEN.swap(false, Ordering::SeqCst),
                 reload_sensors: SHOULD_RELOAD_SENSORS.swap(false, Ordering::SeqCst),
                 update_pos: SHOULD_UPDATE_POS.swap(false, Ordering::SeqCst),
+                show_window: SHOULD_SHOW_WINDOW.swap(false, Ordering::SeqCst),
                 exit: SHOULD_EXIT.swap(false, Ordering::SeqCst),
             }
         }
