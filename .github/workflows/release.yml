@@ -16,6 +16,7 @@ concurrency:
 jobs:
   determine-version:
     name: Determine Semantic Version
+    if: github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[skip ci]')
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.semver.outputs.version }}
@@ -123,14 +124,82 @@ jobs:
           print(f"Calculated version: {version} (tag: {tag}, should_release: {should_release})")
           EOF
 
-  build-windows:
-    name: Build Windows Binary
+  bump-version:
+    name: Bump Cargo Version
     needs: determine-version
     if: needs.determine-version.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.commit.outputs.sha }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Update Cargo.toml and Cargo.lock
+        env:
+          NEW_VERSION: ${{ needs.determine-version.outputs.version }}
+        run: |
+          python3 - << 'EOF'
+          import os
+          import re
+
+          new_ver = os.environ["NEW_VERSION"]
+
+          with open("Cargo.toml", "r", encoding="utf-8") as f:
+              cargo_toml = f.read()
+
+          updated_toml, n_toml = re.subn(
+              r'(?m)(^\[package\][^\[]*?^version\s*=\s*")([^"]*)(")',
+              rf'\g<1>{new_ver}\g<3>',
+              cargo_toml,
+              count=1,
+          )
+          if n_toml != 1:
+              raise RuntimeError("Could not update [package] version in Cargo.toml")
+          with open("Cargo.toml", "w", encoding="utf-8") as f:
+              f.write(updated_toml)
+
+          if os.path.exists("Cargo.lock"):
+              with open("Cargo.lock", "r", encoding="utf-8") as f:
+                  cargo_lock = f.read()
+              updated_lock, n_lock = re.subn(
+                  r'(?m)(^\[\[package\]\]\r?\nname = "ZenithBar"\r?\nversion = ")([^"]*)(")',
+                  rf'\g<1>{new_ver}\g<3>',
+                  cargo_lock,
+                  count=1,
+              )
+              if n_lock != 1:
+                  raise RuntimeError("Could not update ZenithBar version in Cargo.lock")
+              with open("Cargo.lock", "w", encoding="utf-8") as f:
+                  f.write(updated_lock)
+          EOF
+
+      - name: Commit and Push Version Bump
+        id: commit
+        run: |
+          if [ -n "$(git status --porcelain Cargo.toml Cargo.lock)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add Cargo.toml Cargo.lock
+            git commit -m "chore(release): bump version to ${{ needs.determine-version.outputs.tag }} [skip ci]"
+            git push origin "HEAD:${{ github.ref_name }}"
+          else
+            echo "Cargo.toml and Cargo.lock already at ${{ needs.determine-version.outputs.version }}"
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build-windows:
+    name: Build Windows Binary
+    needs: [determine-version, bump-version]
+    if: needs.determine-version.outputs.should_release == 'true' && needs.bump-version.result == 'success'
     runs-on: windows-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.sha }}
 
       - name: Setup Rust Toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -139,11 +208,6 @@ jobs:
 
       - name: Cache Cargo Dependencies
         uses: Swatinem/rust-cache@v2
-
-      - name: Synchronize Version in Cargo.toml
-        shell: bash
-        run: |
-          sed -i "s/^version = .*/version = \"${{ needs.determine-version.outputs.version }}\"/" Cargo.toml
 
       - name: Build Windows Binary
         run: |
@@ -170,12 +234,14 @@ jobs:
 
   build-linux:
     name: Build Linux AppImage
-    needs: determine-version
-    if: needs.determine-version.outputs.should_release == 'true'
+    needs: [determine-version, bump-version]
+    if: needs.determine-version.outputs.should_release == 'true' && needs.bump-version.result == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.bump-version.outputs.sha }}
 
       - name: Install System Dependencies
         run: |
@@ -187,10 +253,6 @@ jobs:
 
       - name: Cache Cargo Dependencies
         uses: Swatinem/rust-cache@v2
-
-      - name: Synchronize Version in Cargo.toml
-        run: |
-          sed -i "s/^version = .*/version = \"${{ needs.determine-version.outputs.version }}\"/" Cargo.toml
 
       - name: Build Linux Binary
         run: |
@@ -209,7 +271,7 @@ jobs:
 
   publish-release:
     name: Publish Multiplatform Release
-    needs: [determine-version, build-windows, build-linux]
+    needs: [determine-version, bump-version, build-windows, build-linux]
     runs-on: ubuntu-latest
     steps:
       - name: Download Windows Artifacts
@@ -233,7 +295,7 @@ jobs:
           tag_name: ${{ needs.determine-version.outputs.tag }}
           name: ZenithBar ${{ needs.determine-version.outputs.tag }}
           body: ${{ needs.determine-version.outputs.changelog }}
-          target_commitish: ${{ github.sha }}
+          target_commitish: ${{ needs.bump-version.outputs.sha }}
           files: |
             ZenithBar-windows-x64.zip
             ZenithBar.exe
