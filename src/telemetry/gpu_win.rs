@@ -132,7 +132,7 @@ impl WindowsGpuMonitor {
                 }
             }
 
-            if temperature_c.is_none() || clock_ghz.is_none() || usage.is_none() {
+            if temperature_c.is_none() || clock_ghz.is_none() || usage.is_none() || fan_percent.is_none() {
                 if !self.nvapi_checked {
                     self.nvapi_checked = true;
                     self.nvapi = NvApi::load();
@@ -151,6 +151,9 @@ impl WindowsGpuMonitor {
                     }
                     if temperature_c.is_none() {
                         temperature_c = nv2.temperature_c;
+                    }
+                    if fan_percent.is_none() {
+                        fan_percent = nv2.fan_percent;
                     }
                     if !self.logged_nv_sample {
                         nvml_diag = format!("{} | {}", nvml_diag, nv2.diag);
@@ -838,10 +841,41 @@ impl Default for NvClockFrequencies {
     }
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct NvCooler {
+    cooler_type: c_int,
+    controller: c_int,
+    default_min: c_int,
+    default_max: c_int,
+    current_min: c_int,
+    current_max: c_int,
+    current_level: c_int,
+    default_policy: c_int,
+    current_policy: c_int,
+    target: c_int,
+    control_type: c_int,
+    active: c_int,
+}
+
+#[repr(C)]
+struct NvCoolerSettings {
+    version: c_uint,
+    count: c_uint,
+    cooler: [NvCooler; 20],
+}
+
+impl Default for NvCoolerSettings {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
+}
+
 struct NvApiSample {
     usage: Option<f32>,
     clock_ghz: Option<f32>,
     temperature_c: Option<f32>,
+    fan_percent: Option<f32>,
     diag: String,
 }
 
@@ -853,6 +887,7 @@ struct NvApi {
     get_thermal: Option<unsafe extern "C" fn(*mut c_void, c_uint, *mut NvThermalSettings) -> c_int>,
     get_pstates: Option<unsafe extern "C" fn(*mut c_void, *mut NvDynamicPstatesInfoEx) -> c_int>,
     get_clocks: Option<unsafe extern "C" fn(*mut c_void, *mut NvClockFrequencies) -> c_int>,
+    get_coolers: Option<unsafe extern "C" fn(*mut c_void, c_uint, *mut NvCoolerSettings) -> c_int>,
 }
 
 impl NvApi {
@@ -909,6 +944,7 @@ impl NvApi {
                 get_thermal: q(query_iface, 0xE3640A56),
                 get_pstates: q(query_iface, 0x60DED2ED),
                 get_clocks: q(query_iface, 0xDCB616C3),
+                get_coolers: q(query_iface, 0xDA141340),
             })
         }
     }
@@ -923,6 +959,7 @@ impl NvApi {
                     usage: None,
                     clock_ghz: None,
                     temperature_c: None,
+                    fan_percent: None,
                     diag: format!("nvapi enum_rc={} count={}", enum_rc, count),
                 };
             }
@@ -955,6 +992,7 @@ impl NvApi {
                     usage: None,
                     clock_ghz: None,
                     temperature_c: None,
+                    fan_percent: None,
                     diag: "nvapi sem handle".to_string(),
                 };
             };
@@ -1002,13 +1040,36 @@ impl NvApi {
                 None
             });
 
+            let mut fan_rc = -1;
+            let fan_percent = self.get_coolers.and_then(|get_coolers| {
+                for ver in [1u32, 2, 3] {
+                    let mut cs = NvCoolerSettings {
+                        version: (size_of::<NvCoolerSettings>() as c_uint) | (ver << 16),
+                        ..Default::default()
+                    };
+                    let rc = get_coolers(gpu, 0, &mut cs);
+                    if ver == 1 {
+                        fan_rc = rc;
+                    }
+                    if rc == 0 && cs.count > 0 {
+                        let lvl = cs.cooler[0].current_level;
+                        if (0..=100).contains(&lvl) {
+                            fan_rc = 0;
+                            return Some(lvl as f32 / 100.0);
+                        }
+                    }
+                }
+                None
+            });
+
             NvApiSample {
                 usage,
                 clock_ghz,
                 temperature_c,
+                fan_percent,
                 diag: format!(
-                    "nvapi therm_rc={} pstate_rc={} clk_rc={}",
-                    therm_rc, pstate_rc, clk_rc
+                    "nvapi therm_rc={} pstate_rc={} clk_rc={} fan_rc={}",
+                    therm_rc, pstate_rc, clk_rc, fan_rc
                 ),
             }
         }
