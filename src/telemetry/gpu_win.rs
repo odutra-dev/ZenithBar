@@ -37,9 +37,12 @@ pub struct WindowsGpuMonitor {
     pdh: Option<PdhGpuQuery>,
     nvml: Option<NvmlApi>,
     nvml_checked: bool,
+    nvapi: Option<NvApi>,
+    nvapi_checked: bool,
     adl: Option<AdlApi>,
     adl_checked: bool,
     logged_dxgi: bool,
+    logged_nv_sample: bool,
     logged_adl_sample: bool,
 }
 
@@ -53,9 +56,12 @@ impl WindowsGpuMonitor {
             pdh,
             nvml: None,
             nvml_checked: false,
+            nvapi: None,
+            nvapi_checked: false,
             adl: None,
             adl_checked: false,
             logged_dxgi: false,
+            logged_nv_sample: false,
             logged_adl_sample: false,
         }
     }
@@ -103,26 +109,58 @@ impl WindowsGpuMonitor {
                     if self.nvml.is_some() { "carregada" } else { "indisponível" }
                 ));
             }
+            let mut nvml_diag = String::new();
             if let Some(nvml) = self.nvml.as_ref() {
-                if let Some(nv) = nvml.sample(&adapter.name) {
-                    if nv.usage.is_some() {
-                        usage = nv.usage;
+                let nv = nvml.sample(&adapter.name);
+                nvml_diag = nv.diag;
+                if nv.usage.is_some() {
+                    usage = nv.usage;
+                }
+                if nv.clock_ghz.is_some() {
+                    clock_ghz = nv.clock_ghz;
+                }
+                if nv.vram_percent.is_some() {
+                    vram_used_gb = nv.vram_used_gb;
+                    vram_total_gb = nv.vram_total_gb;
+                    vram_percent = nv.vram_percent;
+                }
+                if nv.temperature_c.is_some() {
+                    temperature_c = nv.temperature_c;
+                }
+                if nv.fan_percent.is_some() {
+                    fan_percent = nv.fan_percent;
+                }
+            }
+
+            if temperature_c.is_none() || clock_ghz.is_none() || usage.is_none() {
+                if !self.nvapi_checked {
+                    self.nvapi_checked = true;
+                    self.nvapi = NvApi::load();
+                    crate::log_msg(&format!(
+                        "[GPU Win] NvAPI (nvapi64.dll): {}",
+                        if self.nvapi.is_some() { "carregada" } else { "indisponível" }
+                    ));
+                }
+                if let Some(nvapi) = self.nvapi.as_ref() {
+                    let nv2 = nvapi.sample(&adapter.name);
+                    if usage.is_none() {
+                        usage = nv2.usage;
                     }
-                    if nv.clock_ghz.is_some() {
-                        clock_ghz = nv.clock_ghz;
+                    if clock_ghz.is_none() {
+                        clock_ghz = nv2.clock_ghz;
                     }
-                    if nv.vram_percent.is_some() {
-                        vram_used_gb = nv.vram_used_gb;
-                        vram_total_gb = nv.vram_total_gb;
-                        vram_percent = nv.vram_percent;
+                    if temperature_c.is_none() {
+                        temperature_c = nv2.temperature_c;
                     }
-                    if nv.temperature_c.is_some() {
-                        temperature_c = nv.temperature_c;
-                    }
-                    if nv.fan_percent.is_some() {
-                        fan_percent = nv.fan_percent;
+                    if !self.logged_nv_sample {
+                        nvml_diag = format!("{} | {}", nvml_diag, nv2.diag);
                     }
                 }
+            }
+
+            if !self.logged_nv_sample {
+                self.logged_nv_sample = true;
+                crate::log_msg(&format!("[GPU Win] NVIDIA amostra inicial: {}", nvml_diag));
             }
         } else if adapter.vendor_id == 0x1002 {
             if !self.adl_checked {
@@ -433,6 +471,7 @@ struct NvmlSample {
     vram_percent: Option<f32>,
     temperature_c: Option<f32>,
     fan_percent: Option<f32>,
+    diag: String,
 }
 
 type NvmlDevice = *mut c_void;
@@ -442,12 +481,40 @@ struct NvmlApi {
     shutdown: unsafe extern "C" fn() -> c_int,
     device_get_count: unsafe extern "C" fn(*mut c_uint) -> c_int,
     device_get_handle: unsafe extern "C" fn(c_uint, *mut NvmlDevice) -> c_int,
-    device_get_name: unsafe extern "C" fn(NvmlDevice, *mut c_char, c_uint) -> c_int,
-    device_get_utilization: unsafe extern "C" fn(NvmlDevice, *mut NvmlUtilization) -> c_int,
-    device_get_clock: unsafe extern "C" fn(NvmlDevice, c_int, *mut c_uint) -> c_int,
-    device_get_memory: unsafe extern "C" fn(NvmlDevice, *mut NvmlMemory) -> c_int,
-    device_get_temp: unsafe extern "C" fn(NvmlDevice, c_int, *mut c_uint) -> c_int,
+    device_get_name: Option<unsafe extern "C" fn(NvmlDevice, *mut c_char, c_uint) -> c_int>,
+    device_get_utilization: Option<unsafe extern "C" fn(NvmlDevice, *mut NvmlUtilization) -> c_int>,
+    device_get_clock: Option<unsafe extern "C" fn(NvmlDevice, c_int, *mut c_uint) -> c_int>,
+    device_get_memory: Option<unsafe extern "C" fn(NvmlDevice, *mut NvmlMemory) -> c_int>,
+    device_get_temp: Option<unsafe extern "C" fn(NvmlDevice, c_int, *mut c_uint) -> c_int>,
     device_get_fan: Option<unsafe extern "C" fn(NvmlDevice, *mut c_uint) -> c_int>,
+    device_get_fan_v2: Option<unsafe extern "C" fn(NvmlDevice, c_uint, *mut c_uint) -> c_int>,
+}
+
+pub fn find_nvidia_driverstore_file(filename: &str) -> Option<String> {
+    let repo = std::path::Path::new("C:\\Windows\\System32\\DriverStore\\FileRepository");
+    let entries = std::fs::read_dir(repo).ok()?;
+    for entry in entries.flatten() {
+        let dir_name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        if dir_name.starts_with("nv") {
+            let candidate = entry.path().join(filename);
+            if candidate.is_file() {
+                return Some(candidate.to_string_lossy().to_string());
+            }
+        }
+    }
+    None
+}
+
+unsafe fn load_library_path_str(path: &str) -> Option<HMODULE> {
+    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    unsafe {
+        let module = LoadLibraryW(PCWSTR(wide.as_ptr())).ok()?;
+        if module.is_invalid() {
+            None
+        } else {
+            Some(module)
+        }
+    }
 }
 
 unsafe fn load_library_candidates(paths: &[PCWSTR]) -> Option<HMODULE> {
@@ -477,7 +544,11 @@ impl NvmlApi {
                 w!("nvml.dll"),
                 w!("C:\\Windows\\System32\\nvml.dll"),
                 w!("C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvml.dll"),
-            ])?;
+            ])
+            .or_else(|| {
+                find_nvidia_driverstore_file("nvml.dll")
+                    .and_then(|p| load_library_path_str(&p))
+            })?;
 
             let init: unsafe extern "C" fn() -> c_int =
                 match resolve_sym(module, b"nvmlInit_v2\0")
@@ -499,7 +570,9 @@ impl NvmlApi {
                     }
                 };
 
-            if init() != 0 {
+            let init_rc = init();
+            if init_rc != 0 {
+                crate::log_msg(&format!("[GPU Win] nvmlInit falhou: rc={}", init_rc));
                 let _ = FreeLibrary(module);
                 return None;
             }
@@ -518,34 +591,14 @@ impl NvmlApi {
                 let _ = FreeLibrary(module);
                 return None;
             };
-            let Some(device_get_name) = resolve_sym(module, b"nvmlDeviceGetName\0") else {
-                shutdown();
-                let _ = FreeLibrary(module);
-                return None;
-            };
-            let Some(device_get_utilization) =
-                resolve_sym(module, b"nvmlDeviceGetUtilizationRates\0")
-            else {
-                shutdown();
-                let _ = FreeLibrary(module);
-                return None;
-            };
-            let Some(device_get_clock) = resolve_sym(module, b"nvmlDeviceGetClockInfo\0") else {
-                shutdown();
-                let _ = FreeLibrary(module);
-                return None;
-            };
-            let Some(device_get_memory) = resolve_sym(module, b"nvmlDeviceGetMemoryInfo\0") else {
-                shutdown();
-                let _ = FreeLibrary(module);
-                return None;
-            };
-            let Some(device_get_temp) = resolve_sym(module, b"nvmlDeviceGetTemperature\0") else {
-                shutdown();
-                let _ = FreeLibrary(module);
-                return None;
-            };
+
+            let device_get_name = resolve_sym(module, b"nvmlDeviceGetName\0");
+            let device_get_utilization = resolve_sym(module, b"nvmlDeviceGetUtilizationRates\0");
+            let device_get_clock = resolve_sym(module, b"nvmlDeviceGetClockInfo\0");
+            let device_get_memory = resolve_sym(module, b"nvmlDeviceGetMemoryInfo\0");
+            let device_get_temp = resolve_sym(module, b"nvmlDeviceGetTemperature\0");
             let device_get_fan = resolve_sym(module, b"nvmlDeviceGetFanSpeed\0");
+            let device_get_fan_v2 = resolve_sym(module, b"nvmlDeviceGetFanSpeed_v2\0");
 
             Some(Self {
                 module,
@@ -558,18 +611,29 @@ impl NvmlApi {
                 device_get_memory,
                 device_get_temp,
                 device_get_fan,
+                device_get_fan_v2,
             })
         }
     }
 
-    fn sample(&self, expected_name: &str) -> Option<NvmlSample> {
+    fn sample(&self, expected_name: &str) -> NvmlSample {
         unsafe {
             let mut count = 0u32;
-            if (self.device_get_count)(&mut count) != 0 || count == 0 {
-                return None;
+            let count_rc = (self.device_get_count)(&mut count);
+            if count_rc != 0 || count == 0 {
+                return NvmlSample {
+                    usage: None,
+                    clock_ghz: None,
+                    vram_used_gb: 0.0,
+                    vram_total_gb: 0.0,
+                    vram_percent: None,
+                    temperature_c: None,
+                    fan_percent: None,
+                    diag: format!("nvml count_rc={} count={}", count_rc, count),
+                };
             }
 
-            let mut chosen: Option<NvmlDevice> = None;
+            let mut chosen: Option<(u32, NvmlDevice)> = None;
             let expected_lower = expected_name.to_ascii_lowercase();
             for i in 0..count {
                 let mut dev: NvmlDevice = std::ptr::null_mut();
@@ -577,70 +641,121 @@ impl NvmlApi {
                     continue;
                 }
                 if chosen.is_none() {
-                    chosen = Some(dev);
+                    chosen = Some((i, dev));
                 }
-                let mut name_buf = [0 as c_char; 96];
-                if (self.device_get_name)(dev, name_buf.as_mut_ptr(), name_buf.len() as u32) == 0 {
-                    let nv_name = CStr::from_ptr(name_buf.as_ptr())
-                        .to_string_lossy()
-                        .to_ascii_lowercase();
-                    if expected_lower.contains(&nv_name) || nv_name.contains(&expected_lower) {
-                        chosen = Some(dev);
-                        break;
+                if let Some(get_name) = self.device_get_name {
+                    let mut name_buf = [0 as c_char; 96];
+                    if get_name(dev, name_buf.as_mut_ptr(), name_buf.len() as u32) == 0 {
+                        let nv_name = CStr::from_ptr(name_buf.as_ptr())
+                            .to_string_lossy()
+                            .to_ascii_lowercase();
+                        if expected_lower.contains(&nv_name) || nv_name.contains(&expected_lower) {
+                            chosen = Some((i, dev));
+                            break;
+                        }
                     }
                 }
             }
 
-            let dev = chosen?;
+            let Some((dev_idx, dev)) = chosen else {
+                return NvmlSample {
+                    usage: None,
+                    clock_ghz: None,
+                    vram_used_gb: 0.0,
+                    vram_total_gb: 0.0,
+                    vram_percent: None,
+                    temperature_c: None,
+                    fan_percent: None,
+                    diag: format!("nvml sem handle valido entre {} GPUs", count),
+                };
+            };
 
             let mut util = NvmlUtilization { gpu: 0, memory: 0 };
-            let usage = if (self.device_get_utilization)(dev, &mut util) == 0 {
-                Some((util.gpu as f32 / 100.0).clamp(0.0, 1.0))
-            } else {
-                None
-            };
+            let mut util_rc = -1;
+            let usage = self.device_get_utilization.and_then(|get_util| {
+                util_rc = get_util(dev, &mut util);
+                if util_rc == 0 {
+                    Some((util.gpu as f32 / 100.0).clamp(0.0, 1.0))
+                } else {
+                    None
+                }
+            });
 
-            let mut clock_mhz = 0u32;
-            let clock_ghz = if (self.device_get_clock)(dev, 0, &mut clock_mhz) == 0 {
-                Some(clock_mhz as f32 / 1000.0)
-            } else {
+            let mut clock_rc = -1;
+            let clock_ghz = self.device_get_clock.and_then(|get_clk| {
+                // 0 = NVML_CLOCK_GRAPHICS, 1 = NVML_CLOCK_SM
+                for clk_type in [0, 1] {
+                    let mut clock_mhz = 0u32;
+                    let rc = get_clk(dev, clk_type, &mut clock_mhz);
+                    if clk_type == 0 {
+                        clock_rc = rc;
+                    }
+                    if rc == 0 && clock_mhz > 0 {
+                        return Some(clock_mhz as f32 / 1000.0);
+                    }
+                }
                 None
-            };
+            });
 
             let mut mem = NvmlMemory {
                 total: 0,
                 free: 0,
                 used: 0,
             };
-            let (vram_used_gb, vram_total_gb, vram_percent) =
-                if (self.device_get_memory)(dev, &mut mem) == 0 && mem.total > 0 {
-                    let gib = 1024.0 * 1024.0 * 1024.0;
-                    (
-                        mem.used as f64 / gib,
-                        mem.total as f64 / gib,
-                        Some((mem.used as f64 / mem.total as f64).clamp(0.0, 1.0) as f32),
-                    )
-                } else {
-                    (0.0, 0.0, None)
-                };
+            let (vram_used_gb, vram_total_gb, vram_percent) = self
+                .device_get_memory
+                .and_then(|get_mem| {
+                    if get_mem(dev, &mut mem) == 0 && mem.total > 0 {
+                        let gib = 1024.0 * 1024.0 * 1024.0;
+                        Some((
+                            mem.used as f64 / gib,
+                            mem.total as f64 / gib,
+                            Some((mem.used as f64 / mem.total as f64).clamp(0.0, 1.0) as f32),
+                        ))
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or((0.0, 0.0, None));
 
-            let mut temp_c = 0u32;
-            let temperature_c = if (self.device_get_temp)(dev, 0, &mut temp_c) == 0 {
-                Some(temp_c as f32)
-            } else {
-                None
-            };
-
-            let fan_percent = self.device_get_fan.and_then(|get_fan| {
-                let mut fan = 0u32;
-                if get_fan(dev, &mut fan) == 0 && fan <= 100 {
-                    Some(fan as f32 / 100.0)
+            let mut temp_rc = -1;
+            let temperature_c = self.device_get_temp.and_then(|get_temp| {
+                let mut temp_c = 0u32;
+                temp_rc = get_temp(dev, 0, &mut temp_c);
+                if temp_rc == 0 && temp_c > 0 && temp_c < 130 {
+                    Some(temp_c as f32)
                 } else {
                     None
                 }
             });
 
-            Some(NvmlSample {
+            let mut fan_rc = -1;
+            let fan_percent = self
+                .device_get_fan_v2
+                .and_then(|get_fan_v2| {
+                    let mut fan = 0u32;
+                    let rc = get_fan_v2(dev, 0, &mut fan);
+                    fan_rc = rc;
+                    if rc == 0 && fan <= 100 {
+                        Some(fan as f32 / 100.0)
+                    } else {
+                        None
+                    }
+                })
+                .or_else(|| {
+                    self.device_get_fan.and_then(|get_fan| {
+                        let mut fan = 0u32;
+                        let rc = get_fan(dev, &mut fan);
+                        fan_rc = rc;
+                        if rc == 0 && fan <= 100 {
+                            Some(fan as f32 / 100.0)
+                        } else {
+                            None
+                        }
+                    })
+                });
+
+            NvmlSample {
                 usage,
                 clock_ghz,
                 vram_used_gb,
@@ -648,7 +763,11 @@ impl NvmlApi {
                 vram_percent,
                 temperature_c,
                 fan_percent,
-            })
+                diag: format!(
+                    "nvml[idx{}] util_rc={} clk_rc={} temp_rc={} fan_rc={}",
+                    dev_idx, util_rc, clock_rc, temp_rc, fan_rc
+                ),
+            }
         }
     }
 }
@@ -657,6 +776,251 @@ impl Drop for NvmlApi {
     fn drop(&mut self) {
         unsafe {
             (self.shutdown)();
+            let _ = FreeLibrary(self.module);
+        }
+    }
+}
+
+// ============================================================================
+// NVIDIA NvAPI Fallback Loader (nvapi64.dll)
+// ============================================================================
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct NvThermalSensor {
+    controller: c_int,
+    default_min_temp: c_int,
+    default_max_temp: c_int,
+    current_temp: c_int,
+    target: c_int,
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct NvThermalSettings {
+    version: c_uint,
+    count: c_uint,
+    sensor: [NvThermalSensor; 3],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct NvDynamicPstateUtil {
+    b_is_present: c_uint,
+    percentage: c_uint,
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct NvDynamicPstatesInfoEx {
+    version: c_uint,
+    flags: c_uint,
+    utilization: [NvDynamicPstateUtil; 8],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct NvClockFrequencyDomain {
+    b_is_present: c_uint,
+    frequency: c_uint, // kHz
+}
+
+#[repr(C)]
+struct NvClockFrequencies {
+    version: c_uint,
+    clock_type: c_uint,
+    domain: [NvClockFrequencyDomain; 32],
+}
+
+impl Default for NvClockFrequencies {
+    fn default() -> Self {
+        unsafe { std::mem::zeroed() }
+    }
+}
+
+struct NvApiSample {
+    usage: Option<f32>,
+    clock_ghz: Option<f32>,
+    temperature_c: Option<f32>,
+    diag: String,
+}
+
+struct NvApi {
+    module: HMODULE,
+    unload: Option<unsafe extern "C" fn() -> c_int>,
+    enum_gpus: unsafe extern "C" fn(*mut [*mut c_void; 64], *mut c_uint) -> c_int,
+    get_full_name: Option<unsafe extern "C" fn(*mut c_void, *mut c_char) -> c_int>,
+    get_thermal: Option<unsafe extern "C" fn(*mut c_void, c_uint, *mut NvThermalSettings) -> c_int>,
+    get_pstates: Option<unsafe extern "C" fn(*mut c_void, *mut NvDynamicPstatesInfoEx) -> c_int>,
+    get_clocks: Option<unsafe extern "C" fn(*mut c_void, *mut NvClockFrequencies) -> c_int>,
+}
+
+impl NvApi {
+    fn load() -> Option<Self> {
+        unsafe {
+            let module = load_library_candidates(&[
+                w!("nvapi64.dll"),
+                w!("C:\\Windows\\System32\\nvapi64.dll"),
+            ])?;
+
+            let Some(query_iface): Option<unsafe extern "C" fn(c_uint) -> *const c_void> =
+                resolve_sym(module, b"nvapi_QueryInterface\0")
+            else {
+                let _ = FreeLibrary(module);
+                return None;
+            };
+
+            unsafe fn q<T>(
+                qi: unsafe extern "C" fn(c_uint) -> *const c_void,
+                id: c_uint,
+            ) -> Option<T> {
+                let ptr = unsafe { qi(id) };
+                if ptr.is_null() {
+                    None
+                } else {
+                    Some(unsafe { std::mem::transmute_copy(&ptr) })
+                }
+            }
+
+            let Some(init): Option<unsafe extern "C" fn() -> c_int> = q(query_iface, 0x0150E828)
+            else {
+                let _ = FreeLibrary(module);
+                return None;
+            };
+            if init() != 0 {
+                let _ = FreeLibrary(module);
+                return None;
+            }
+
+            let unload: Option<unsafe extern "C" fn() -> c_int> = q(query_iface, 0xD22BDD7E);
+            let Some(enum_gpus) = q(query_iface, 0xE5AC921F) else {
+                if let Some(u) = unload {
+                    u();
+                }
+                let _ = FreeLibrary(module);
+                return None;
+            };
+
+            Some(Self {
+                module,
+                unload,
+                enum_gpus,
+                get_full_name: q(query_iface, 0xCEEE8E9F),
+                get_thermal: q(query_iface, 0xE3640A56),
+                get_pstates: q(query_iface, 0x60DED2ED),
+                get_clocks: q(query_iface, 0xDCB616C3),
+            })
+        }
+    }
+
+    fn sample(&self, expected_name: &str) -> NvApiSample {
+        unsafe {
+            let mut handles = [std::ptr::null_mut(); 64];
+            let mut count = 0u32;
+            let enum_rc = (self.enum_gpus)(&mut handles, &mut count);
+            if enum_rc != 0 || count == 0 {
+                return NvApiSample {
+                    usage: None,
+                    clock_ghz: None,
+                    temperature_c: None,
+                    diag: format!("nvapi enum_rc={} count={}", enum_rc, count),
+                };
+            }
+
+            let expected_lower = expected_name.to_ascii_lowercase();
+            let mut chosen: Option<*mut c_void> = None;
+            for &h in handles.iter().take((count as usize).min(64)) {
+                if h.is_null() {
+                    continue;
+                }
+                if chosen.is_none() {
+                    chosen = Some(h);
+                }
+                if let Some(get_name) = self.get_full_name {
+                    let mut buf = [0 as c_char; 64];
+                    if get_name(h, buf.as_mut_ptr()) == 0 {
+                        let name = CStr::from_ptr(buf.as_ptr())
+                            .to_string_lossy()
+                            .to_ascii_lowercase();
+                        if expected_lower.contains(&name) || name.contains(&expected_lower) {
+                            chosen = Some(h);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            let Some(gpu) = chosen else {
+                return NvApiSample {
+                    usage: None,
+                    clock_ghz: None,
+                    temperature_c: None,
+                    diag: "nvapi sem handle".to_string(),
+                };
+            };
+
+            let mut therm_rc = -1;
+            let temperature_c = self.get_thermal.and_then(|get_therm| {
+                let mut ts = NvThermalSettings {
+                    version: (size_of::<NvThermalSettings>() as c_uint) | (1 << 16),
+                    ..Default::default()
+                };
+                therm_rc = get_therm(gpu, 0, &mut ts);
+                if therm_rc == 0 && ts.count > 0 {
+                    let t = ts.sensor[0].current_temp;
+                    if t > 0 && t < 130 {
+                        return Some(t as f32);
+                    }
+                }
+                None
+            });
+
+            let mut pstate_rc = -1;
+            let usage = self.get_pstates.and_then(|get_ps| {
+                let mut ps = NvDynamicPstatesInfoEx {
+                    version: (size_of::<NvDynamicPstatesInfoEx>() as c_uint) | (1 << 16),
+                    ..Default::default()
+                };
+                pstate_rc = get_ps(gpu, &mut ps);
+                if pstate_rc == 0 && ps.utilization[0].b_is_present != 0 {
+                    return Some((ps.utilization[0].percentage as f32 / 100.0).clamp(0.0, 1.0));
+                }
+                None
+            });
+
+            let mut clk_rc = -1;
+            let clock_ghz = self.get_clocks.and_then(|get_clk| {
+                let mut cf = NvClockFrequencies {
+                    version: (size_of::<NvClockFrequencies>() as c_uint) | (2 << 16),
+                    clock_type: 0, // current
+                    ..Default::default()
+                };
+                clk_rc = get_clk(gpu, &mut cf);
+                if clk_rc == 0 && cf.domain[0].b_is_present != 0 && cf.domain[0].frequency > 0 {
+                    return Some(cf.domain[0].frequency as f32 / 1_000_000.0);
+                }
+                None
+            });
+
+            NvApiSample {
+                usage,
+                clock_ghz,
+                temperature_c,
+                diag: format!(
+                    "nvapi therm_rc={} pstate_rc={} clk_rc={}",
+                    therm_rc, pstate_rc, clk_rc
+                ),
+            }
+        }
+    }
+}
+
+impl Drop for NvApi {
+    fn drop(&mut self) {
+        unsafe {
+            if let Some(u) = self.unload {
+                u();
+            }
             let _ = FreeLibrary(self.module);
         }
     }
