@@ -62,6 +62,7 @@ component EditableLabel inherits Rectangle {
     in property <int> font_weight: 400;
     in property <color> text_color: #94a3b8;
     in property <color> accent_color: #38bdf8;
+    in property <bool> align_right: false;
     callback committed(string);
 
     private property <bool> editing: false;
@@ -94,6 +95,7 @@ component EditableLabel inherits Rectangle {
                 font-size: root.font_size;
                 font-weight: root.font_weight;
                 color: ta.has-hover ? #f1f5f9 : root.text_color;
+                horizontal-alignment: root.align_right ? right : left;
                 wrap: word-wrap;
                 horizontal-stretch: 1;
                 vertical-alignment: center;
@@ -288,6 +290,7 @@ export component AppWindow inherits Window {
     in-out property <string> i18n_temp: "Temp";
     in-out property <string> i18n_usage_per_core: "Per-Core Usage:";
     in-out property <string> i18n_usage: "uso";
+    in-out property <string> i18n_available: "Disp.";
     in-out property <string> i18n_fan: "Fan";
     in-out property <string> i18n_local_ip: "Local";
     in-out property <string> i18n_wan_ip: "WAN";
@@ -304,6 +307,8 @@ export component AppWindow inherits Window {
     in-out property <bool> show_machine_name: true;
     in-out property <bool> show_clock: true;
     in-out property <bool> collapse_menu_bar: false;
+    in-out property <bool> alert_blink_enabled: true;
+    in-out property <bool> text_align_right: false;
 
     // CPU
     in-out property <string> cpu_name: "Intel / AMD Processor";
@@ -495,19 +500,20 @@ export component AppWindow inherits Window {
                     title: root.i18n_cpu_title;
                     icon_source: @image-url("../assets/icons/cpu.svg");
                     accent_color: #38bdf8;
-                    alert_active: root.cpu_usage > 0.85 || root.cpu_temp_val > 80.0;
+                    alert_active: root.alert_blink_enabled && (root.cpu_usage > 0.85 || root.cpu_temp_val > 80.0);
 
                     EditableLabel {
                         text: root.cpu_name;
                         font_size: 10px;
                         text_color: #94a3b8;
                         accent_color: #38bdf8;
+                        align_right: root.text_align_right;
                         committed(val) => { root.request_set_custom_cpu_name(val); }
                     }
 
                     ProgressBar {
                         progress: root.cpu_usage;
-                        bar_color: root.cpu_usage > 0.85 ? #ef4444 : #38bdf8;
+                        bar_color: (root.alert_blink_enabled && root.cpu_usage > 0.85) ? #ef4444 : #38bdf8;
                     }
 
                     VerticalLayout {
@@ -524,23 +530,29 @@ export component AppWindow inherits Window {
                                 text: root.cpu_temp_str;
                                 font-size: 10px;
                                 font-weight: 700;
-                                color: root.cpu_temp_val > 80.0 ? #ef4444 : #f1f5f9;
+                                color: (root.alert_blink_enabled && root.cpu_temp_val > 80.0) ? #ef4444 : #f1f5f9;
                             }
                         }
                         HorizontalLayout {
-                            padding-left: 14px;
+                            padding-left: root.text_align_right ? 0px : 14px;
+                            padding-right: root.text_align_right ? 14px : 0px;
                             Text {
                                 text: root.cpu_clock_str;
                                 font-size: 9.5px;
                                 color: #cbd5e1;
+                                horizontal-alignment: root.text_align_right ? right : left;
+                                horizontal-stretch: 1;
                             }
                         }
                         HorizontalLayout {
-                            padding-left: 14px;
+                            padding-left: root.text_align_right ? 0px : 14px;
+                            padding-right: root.text_align_right ? 14px : 0px;
                             Text {
                                 text: root.i18n_usage + ": " + root.cpu_usage_str;
                                 font-size: 9.5px;
                                 color: #cbd5e1;
+                                horizontal-alignment: root.text_align_right ? right : left;
+                                horizontal-stretch: 1;
                             }
                         }
                     }
@@ -590,12 +602,12 @@ export component AppWindow inherits Window {
                     title: root.i18n_ram_title;
                     icon_source: @image-url("../assets/icons/ram.svg");
                     accent_color: #a855f7;
-                    alert_active: root.ram_percent > 0.90;
+                    alert_active: root.alert_blink_enabled && root.ram_percent > 0.90;
                     badge: root.ram_percent_str;
 
                     ProgressBar {
                         progress: root.ram_percent;
-                        bar_color: root.ram_percent > 0.90 ? #ef4444 : #a855f7;
+                        bar_color: (root.alert_blink_enabled && root.ram_percent > 0.90) ? #ef4444 : #a855f7;
                     }
 
                     HorizontalLayout {
@@ -626,19 +638,20 @@ export component AppWindow inherits Window {
                     title: root.i18n_gpu_title;
                     icon_source: @image-url("../assets/icons/gpu.svg");
                     accent_color: #10b981;
-                    alert_active: root.gpu_usage > 0.85 || root.gpu_temp_val > 80.0;
+                    alert_active: root.alert_blink_enabled && (root.gpu_usage > 0.85 || root.gpu_temp_val > 80.0);
 
                     EditableLabel {
                         text: root.gpu_name;
                         font_size: 10px;
                         text_color: #94a3b8;
                         accent_color: #10b981;
+                        align_right: root.text_align_right;
                         committed(val) => { root.request_set_custom_gpu_name(val); }
                     }
 
                     ProgressBar {
                         progress: root.gpu_usage;
-                        bar_color: root.gpu_usage > 0.85 ? #ef4444 : #10b981;
+                        bar_color: (root.alert_blink_enabled && root.gpu_usage > 0.85) ? #ef4444 : #10b981;
                     }
 
                     VerticalLayout {
@@ -655,39 +668,51 @@ export component AppWindow inherits Window {
                                 text: root.gpu_temp_str;
                                 font-size: 10px;
                                 font-weight: 700;
-                                color: root.gpu_temp_val > 80.0 ? #ef4444 : #f1f5f9;
+                                color: (root.alert_blink_enabled && root.gpu_temp_val > 80.0) ? #ef4444 : #f1f5f9;
                             }
                         }
                         HorizontalLayout {
-                            padding-left: 14px;
+                            padding-left: root.text_align_right ? 0px : 14px;
+                            padding-right: root.text_align_right ? 14px : 0px;
                             Text {
                                 text: root.gpu_clock_str;
                                 font-size: 9.5px;
                                 color: #cbd5e1;
+                                horizontal-alignment: root.text_align_right ? right : left;
+                                horizontal-stretch: 1;
                             }
                         }
                         HorizontalLayout {
-                            padding-left: 14px;
+                            padding-left: root.text_align_right ? 0px : 14px;
+                            padding-right: root.text_align_right ? 14px : 0px;
                             Text {
                                 text: root.i18n_usage + ": " + root.gpu_usage_str;
                                 font-size: 9.5px;
                                 color: #cbd5e1;
+                                horizontal-alignment: root.text_align_right ? right : left;
+                                horizontal-stretch: 1;
                             }
                         }
                         HorizontalLayout {
-                            padding-left: 14px;
+                            padding-left: root.text_align_right ? 0px : 14px;
+                            padding-right: root.text_align_right ? 14px : 0px;
                             Text {
                                 text: "VRAM: " + root.gpu_vram_pct_str;
                                 font-size: 9.5px;
                                 color: #cbd5e1;
+                                horizontal-alignment: root.text_align_right ? right : left;
+                                horizontal-stretch: 1;
                             }
                         }
                         HorizontalLayout {
-                            padding-left: 14px;
+                            padding-left: root.text_align_right ? 0px : 14px;
+                            padding-right: root.text_align_right ? 14px : 0px;
                             Text {
                                 text: root.i18n_fan + ": " + root.gpu_fan_pct_str;
                                 font-size: 9.5px;
                                 color: #94a3b8;
+                                horizontal-alignment: root.text_align_right ? right : left;
+                                horizontal-stretch: 1;
                             }
                         }
                     }
@@ -795,6 +820,7 @@ export component AppWindow inherits Window {
                         font_size: 10px;
                         text_color: #94a3b8;
                         accent_color: #f43f5e;
+                        align_right: root.text_align_right;
                         committed(val) => { root.request_set_custom_net_name(val); }
                     }
 

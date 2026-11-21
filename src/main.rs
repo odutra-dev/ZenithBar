@@ -81,6 +81,7 @@ fn apply_locale_to_app(ui: &AppWindow, s: &i18n::I18nStrings) {
     ui.set_i18n_temp(s.temp.clone().into());
     ui.set_i18n_usage_per_core(s.usage_per_core.clone().into());
     ui.set_i18n_usage(s.usage.clone().into());
+    ui.set_i18n_available(s.available.clone().into());
     ui.set_i18n_fan(s.fan.clone().into());
     ui.set_i18n_local_ip(s.local_ip.clone().into());
     ui.set_i18n_wan_ip(s.wan_ip.clone().into());
@@ -220,13 +221,29 @@ fn populate_settings_ui(sw: &SettingsWindow, cfg: &AppConfig, monitor_count: usi
     sw.set_hotkey_reserve_space(if cfg.hotkey_reserve_space.is_empty() { "Ctrl+Shift+R".into() } else { cfg.hotkey_reserve_space.clone().into() });
 }
 
+enum TelemetryControl {
+    SetInterval(u64),
+    ReloadSensors,
+}
+
+fn sync_monitor_height(ui: &AppWindow, monitors: &[monitor::MonitorDevice], screen_index: usize) {
+    let target_h = if screen_index < monitors.len() {
+        monitors[screen_index].work_height
+    } else {
+        monitors.first().map(|m| m.work_height).unwrap_or(1080)
+    };
+    let scale = ui.window().scale_factor();
+    let logical_h = if scale > 0.0 { target_h as f32 / scale } else { target_h as f32 };
+    ui.set_sidebar_height_px(logical_h);
+}
+
 fn apply_settings_to_app(
     ui: &AppWindow,
     sw: &SettingsWindow,
     cfg: &mut AppConfig,
     ab: &mut Option<AppBarManager>,
     monitors: &[monitor::MonitorDevice],
-    interval_tx: &std::sync::mpsc::Sender<u64>,
+    ctrl_tx: &std::sync::mpsc::Sender<TelemetryControl>,
 ) {
     let edge_changed = cfg.is_dock_right() != sw.get_dock_right();
     let monitor_changed = cfg.screen_index != (sw.get_monitor_idx().max(0) as usize);
@@ -243,7 +260,7 @@ fn apply_settings_to_app(
     cfg.initially_hidden = sw.get_initially_hidden();
 
     cfg.polling_interval = sw.get_polling_interval().clamp(100, 10000) as u64;
-    let _ = interval_tx.send(cfg.polling_interval);
+    let _ = ctrl_tx.send(TelemetryControl::SetInterval(cfg.polling_interval));
     cfg.ui_scale = sw.get_ui_scale();
     cfg.show_tray_icon = sw.get_show_tray_icon();
     cfg.click_through = sw.get_click_through();
@@ -290,15 +307,10 @@ fn apply_settings_to_app(
     ui.set_collapse_menu_bar(cfg.collapse_menu_bar);
     ui.set_sidebar_width_px(cfg.sidebar_width as f32);
     ui.set_bg_opacity_val(cfg.bg_opacity);
+    ui.set_alert_blink_enabled(cfg.alert_blink);
+    ui.set_text_align_right(cfg.text_align.eq_ignore_ascii_case("Right"));
 
-    let target_h = if cfg.screen_index < monitors.len() {
-        monitors[cfg.screen_index].work_height
-    } else {
-        monitors.first().map(|m| m.work_height).unwrap_or(1080)
-    };
-    let scale = ui.window().scale_factor();
-    let logical_h = if scale > 0.0 { target_h as f32 / scale } else { target_h as f32 };
-    ui.set_sidebar_height_px(logical_h);
+    sync_monitor_height(ui, monitors, cfg.screen_index);
     ui.window().request_redraw();
 
     tray::win32::set_always_top_state(cfg.always_top);
@@ -430,11 +442,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ui.set_collapse_menu_bar(cfg.collapse_menu_bar);
         ui.set_sidebar_width_px(cfg.sidebar_width as f32);
         ui.set_bg_opacity_val(cfg.bg_opacity);
+        ui.set_alert_blink_enabled(cfg.alert_blink);
+        ui.set_text_align_right(cfg.text_align.eq_ignore_ascii_case("Right"));
     }
 
     log_msg("4. Inicializando thread de telemetria isolada em background (MTA)...");
     let (tx, rx) = std::sync::mpsc::sync_channel::<TelemetrySnapshot>(1);
-    let (interval_tx, interval_rx) = std::sync::mpsc::channel::<u64>();
+    let (ctrl_tx, ctrl_rx) = std::sync::mpsc::channel::<TelemetryControl>();
     let initial_polling_interval = config.borrow().polling_interval.clamp(100, 10000);
     std::thread::spawn(move || {
         log_msg("[Telemetry Thread] Iniciada com sucesso.");
@@ -446,15 +460,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 Ok(()) | Err(std::sync::mpsc::TrySendError::Full(_)) => {}
                 Err(std::sync::mpsc::TrySendError::Disconnected(_)) => break,
             }
-            match interval_rx.recv_timeout(Duration::from_millis(interval)) {
-                Ok(mut next) => {
-                    while let Ok(newer) = interval_rx.try_recv() {
-                        next = newer;
+            match ctrl_rx.recv_timeout(Duration::from_millis(interval)) {
+                Ok(first_cmd) => {
+                    let mut reload = false;
+                    let mut apply_cmd = |cmd: TelemetryControl| match cmd {
+                        TelemetryControl::SetInterval(next) => {
+                            interval = next.clamp(100, 10000);
+                            log_msg(&format!("[Telemetry Thread] Novo intervalo ativo: {} ms", interval));
+                        }
+                        TelemetryControl::ReloadSensors => {
+                            reload = true;
+                        }
+                    };
+                    apply_cmd(first_cmd);
+                    while let Ok(cmd) = ctrl_rx.try_recv() {
+                        apply_cmd(cmd);
                     }
-                    interval = next.clamp(100, 10000);
-                    log_msg(&format!("[Telemetry Thread] Novo intervalo ativo: {} ms", interval));
+                    if reload {
+                        log_msg("[Telemetry Thread] Recarregando sensores...");
+                        engine.reload_sensors();
+                    }
                 }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {},
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
             }
         }
@@ -632,7 +659,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // APLICAR (em tempo real)
-    let interval_apply = interval_tx.clone();
+    let ctrl_apply = ctrl_tx.clone();
     let settings_weak_apply = settings_ui.as_weak();
     let config_apply = config.clone();
     let ui_weak_apply = ui.as_weak();
@@ -642,13 +669,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let (Some(sw), Some(ui)) = (settings_weak_apply.upgrade(), ui_weak_apply.upgrade()) {
             let mut cfg = config_apply.borrow_mut();
             if let Ok(mut ab_guard) = appbar_apply.try_borrow_mut() {
-                apply_settings_to_app(&ui, &sw, &mut cfg, &mut ab_guard, &monitors_apply, &interval_apply);
+                apply_settings_to_app(&ui, &sw, &mut cfg, &mut ab_guard, &monitors_apply, &ctrl_apply);
             }
         }
     });
 
     // SALVAR (aplica em tempo real e fecha a janela)
-    let interval_save = interval_tx.clone();
+    let ctrl_save = ctrl_tx.clone();
     let settings_weak_save = settings_ui.as_weak();
     let config_save = config.clone();
     let ui_weak_save = ui.as_weak();
@@ -658,7 +685,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let (Some(sw), Some(ui)) = (settings_weak_save.upgrade(), ui_weak_save.upgrade()) {
             let mut cfg = config_save.borrow_mut();
             if let Ok(mut ab_guard) = appbar_save.try_borrow_mut() {
-                apply_settings_to_app(&ui, &sw, &mut cfg, &mut ab_guard, &monitors_save, &interval_save);
+                apply_settings_to_app(&ui, &sw, &mut cfg, &mut ab_guard, &monitors_save, &ctrl_save);
             }
             let _ = sw.hide();
         }
@@ -739,6 +766,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if monitors_tray_count > 0 {
                             cfg.screen_index = (cfg.screen_index + 1) % monitors_tray_count;
                             let _ = cfg.save();
+                            if let Some(ui) = ui_weak_timer.upgrade() {
+                                sync_monitor_height(&ui, &monitors_tray_list, cfg.screen_index);
+                            }
                             if let Ok(mut ab_guard) = appbar_tray.try_borrow_mut() {
                                 if let Some(ab) = ab_guard.as_mut() {
                                     if cfg.screen_index < monitors_tray_list.len() {
@@ -749,8 +779,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
 
+                    if events.toggle_appbar {
+                        if let Some(ui) = ui_weak_timer.upgrade() {
+                            let mut cfg = config_poll.borrow_mut();
+                            cfg.use_app_bar = !cfg.use_app_bar;
+                            ui.set_is_appbar(cfg.use_app_bar);
+                            let _ = cfg.save();
+                            if let Ok(mut ab_guard) = appbar_tray.try_borrow_mut() {
+                                if let Some(ab) = ab_guard.as_mut() {
+                                    ab.set_appbar_mode(cfg.use_app_bar);
+                                }
+                            }
+                        }
+                    }
+
                     if events.reload_sensors {
                         log_msg("Recarregar sensores solicitado via menu da bandeja.");
+                        let _ = ctrl_tx.send(TelemetryControl::ReloadSensors);
                     }
 
                     if events.update_pos {
@@ -1097,7 +1142,7 @@ fn apply_snapshot(
     ui.set_ram_percent(snap.mem.percent);
     ui.set_ram_percent_str(format!("{:.0}%", snap.mem.percent * 100.0).into());
     ui.set_ram_usage_str(format!("{:.1} / {:.1} GB", snap.mem.used_gb, snap.mem.total_gb).into());
-    ui.set_ram_available_str(format!("{:.1} GB Disp.", snap.mem.available_gb).into());
+    ui.set_ram_available_str(format!("{:.1} GB {}", snap.mem.available_gb, ui.get_i18n_available()).into());
     sync_vec_model(&models.ram_history, snap.mem.history);
 
     // GPU
