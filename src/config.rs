@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -280,58 +280,68 @@ impl AppConfig {
 
     pub fn load() -> Self {
         let path = Self::config_path();
-        if let Ok(content) = fs::read_to_string(&path) {
-            if let Ok(cfg) = serde_json::from_str::<Self>(&content) {
-                let mut cfg = cfg;
+        let legacy = Path::new("config.toml");
+        let (cfg, should_save) = Self::load_from_paths(&path, Some(legacy));
+        if should_save {
+            let _ = cfg.save_to(&path);
+            cfg.apply_startup();
+        }
+        cfg
+    }
+
+    pub(crate) fn load_from_paths(settings_path: &Path, legacy_toml: Option<&Path>) -> (Self, bool) {
+        if let Ok(content) = fs::read_to_string(settings_path) {
+            if let Ok(mut cfg) = serde_json::from_str::<Self>(&content) {
                 cfg.sidebar_width = cfg.sidebar_width.clamp(180, 360);
-                return cfg;
+                return (cfg, false);
             }
         }
 
         // Caso exista um config.toml legado da versão anterior, migra automaticamente
-        let toml_legacy = PathBuf::from("config.toml");
-        if toml_legacy.exists() {
-            if let Ok(content) = fs::read_to_string(&toml_legacy) {
-                #[derive(Deserialize)]
-                struct LegacyConfig {
-                    refresh_interval_ms: Option<u64>,
-                    dock_right: Option<bool>,
-                    use_appbar: Option<bool>,
-                    bar_width: Option<u32>,
-                    monitor_index: Option<usize>,
-                    show_all_disks: Option<bool>,
-                    show_gpu: Option<bool>,
-                    show_sparklines: Option<bool>,
-                }
-                if let Ok(legacy) = toml::from_str::<LegacyConfig>(&content) {
-                    let mut cfg = Self::default();
-                    if let Some(r) = legacy.refresh_interval_ms { cfg.polling_interval = r; }
-                    if let Some(d) = legacy.dock_right { cfg.set_dock_right(d); }
-                    if let Some(u) = legacy.use_appbar { cfg.use_app_bar = u; }
-                    if let Some(w) = legacy.bar_width { cfg.sidebar_width = w.clamp(180, 360); }
-                    if let Some(m) = legacy.monitor_index { cfg.screen_index = m; }
-                    if let Some(ad) = legacy.show_all_disks { cfg.show_all_disks = ad; }
-                    if let Some(g) = legacy.show_gpu { cfg.enable_gpu = g; }
-                    if let Some(s) = legacy.show_sparklines { cfg.show_sparklines = s; }
-                    let _ = cfg.save();
-                    let mut cfg = cfg;
-                cfg.sidebar_width = cfg.sidebar_width.clamp(180, 360);
-                return cfg;
+        if let Some(toml_legacy) = legacy_toml {
+            if toml_legacy.exists() {
+                if let Ok(content) = fs::read_to_string(toml_legacy) {
+                    #[derive(Deserialize)]
+                    struct LegacyConfig {
+                        refresh_interval_ms: Option<u64>,
+                        dock_right: Option<bool>,
+                        use_appbar: Option<bool>,
+                        bar_width: Option<u32>,
+                        monitor_index: Option<usize>,
+                        show_all_disks: Option<bool>,
+                        show_gpu: Option<bool>,
+                        show_sparklines: Option<bool>,
+                    }
+                    if let Ok(legacy) = toml::from_str::<LegacyConfig>(&content) {
+                        let mut cfg = Self::default();
+                        if let Some(r) = legacy.refresh_interval_ms { cfg.polling_interval = r; }
+                        if let Some(d) = legacy.dock_right { cfg.set_dock_right(d); }
+                        if let Some(u) = legacy.use_appbar { cfg.use_app_bar = u; }
+                        if let Some(w) = legacy.bar_width { cfg.sidebar_width = w.clamp(180, 360); }
+                        if let Some(m) = legacy.monitor_index { cfg.screen_index = m; }
+                        if let Some(ad) = legacy.show_all_disks { cfg.show_all_disks = ad; }
+                        if let Some(g) = legacy.show_gpu { cfg.enable_gpu = g; }
+                        if let Some(s) = legacy.show_sparklines { cfg.show_sparklines = s; }
+                        cfg.sidebar_width = cfg.sidebar_width.clamp(180, 360);
+                        return (cfg, true);
+                    }
                 }
             }
         }
 
-        let cfg = Self::default();
-        let _ = cfg.save();
-        cfg
+        (Self::default(), true)
+    }
+
+    pub(crate) fn save_to(&self, path: &Path) -> Result<(), std::io::Error> {
+        let serialized = serde_json::to_string_pretty(self).map_err(|e| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, e)
+        })?;
+        fs::write(path, serialized)
     }
 
     pub fn save(&self) -> Result<(), std::io::Error> {
         let path = Self::config_path();
-        let serialized = serde_json::to_string_pretty(self).map_err(|e| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, e)
-        })?;
-        fs::write(path, serialized)?;
+        self.save_to(&path)?;
 
         self.apply_startup();
 
@@ -438,5 +448,138 @@ impl AppConfig {
                 let _ = RegCloseKey(hkey);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "zenithbar_cfg_{}_{}_{}",
+            label,
+            std::process::id(),
+            nanos
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn default_config_values_are_sensible() {
+        let cfg = AppConfig::default();
+        assert_eq!(cfg.dock_edge, "Right");
+        assert!(cfg.is_dock_right());
+        assert_eq!(cfg.culture, "en-US");
+        assert_eq!(cfg.polling_interval, 1000);
+        assert_eq!(cfg.sidebar_width, 300);
+        assert_eq!(cfg.hotkey_toggle, "Ctrl+Shift+S");
+        assert_eq!(cfg.module_order, vec!["cpu", "ram", "gpu", "disks", "network"]);
+        assert!(cfg.enable_cpu && cfg.enable_ram && cfg.enable_gpu && cfg.enable_disks && cfg.enable_network);
+    }
+
+    #[test]
+    fn dock_edge_helpers_toggle_and_match_case_insensitively() {
+        let mut cfg = AppConfig::default();
+        cfg.dock_edge = "right".to_string();
+        assert!(cfg.is_dock_right());
+
+        cfg.set_dock_right(false);
+        assert_eq!(cfg.dock_edge, "Left");
+        assert!(!cfg.is_dock_right());
+
+        cfg.set_dock_right(true);
+        assert_eq!(cfg.dock_edge, "Right");
+        assert!(cfg.is_dock_right());
+    }
+
+    #[test]
+    fn json_round_trip_uses_pascal_case_and_partial_defaults() {
+        let dir = unique_temp_dir("roundtrip");
+        let settings_path = dir.join("Settings.json");
+
+        let mut cfg = AppConfig::default();
+        cfg.culture = "pt-BR".to_string();
+        cfg.sidebar_width = 250;
+        cfg.custom_cpu_name = "Ryzen 7".to_string();
+        cfg.save_to(&settings_path).unwrap();
+
+        let raw = fs::read_to_string(&settings_path).unwrap();
+        assert!(raw.contains("\"Culture\": \"pt-BR\""));
+        assert!(raw.contains("\"SidebarWidth\": 250"));
+
+        let (loaded, should_save) = AppConfig::load_from_paths(&settings_path, None);
+        assert!(!should_save);
+        assert_eq!(loaded.culture, "pt-BR");
+        assert_eq!(loaded.sidebar_width, 250);
+        assert_eq!(loaded.custom_cpu_name, "Ryzen 7");
+
+        // Partial JSON fills remaining defaults and clamps sidebar width
+        fs::write(&settings_path, r#"{"SidebarWidth": 999, "ShowClock": false}"#).unwrap();
+        let (clamped, should_save) = AppConfig::load_from_paths(&settings_path, None);
+        assert!(!should_save);
+        assert_eq!(clamped.sidebar_width, 360);
+        assert!(!clamped.show_clock);
+        assert_eq!(clamped.polling_interval, 1000);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_from_paths_migrates_legacy_toml_and_clamps_width() {
+        let dir = unique_temp_dir("legacy");
+        let settings_path = dir.join("Settings.json");
+        let legacy_path = dir.join("config.toml");
+
+        fs::write(
+            &legacy_path,
+            r#"
+refresh_interval_ms = 500
+dock_right = false
+use_appbar = false
+bar_width = 100
+monitor_index = 2
+show_all_disks = true
+show_gpu = false
+show_sparklines = false
+"#,
+        )
+        .unwrap();
+
+        let (cfg, should_save) = AppConfig::load_from_paths(&settings_path, Some(&legacy_path));
+        assert!(should_save);
+        assert_eq!(cfg.polling_interval, 500);
+        assert!(!cfg.is_dock_right());
+        assert!(!cfg.use_app_bar);
+        assert_eq!(cfg.sidebar_width, 180);
+        assert_eq!(cfg.screen_index, 2);
+        assert!(cfg.show_all_disks);
+        assert!(!cfg.enable_gpu);
+        assert!(!cfg.show_sparklines);
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn load_from_paths_falls_back_to_defaults_when_files_are_corrupt() {
+        let dir = unique_temp_dir("corrupt");
+        let settings_path = dir.join("Settings.json");
+        let legacy_path = dir.join("config.toml");
+
+        fs::write(&settings_path, "{ not valid json").unwrap();
+        fs::write(&legacy_path, "not = [valid toml").unwrap();
+
+        let (cfg, should_save) = AppConfig::load_from_paths(&settings_path, Some(&legacy_path));
+        assert!(should_save);
+        assert_eq!(cfg.sidebar_width, 300);
+        assert_eq!(cfg.culture, "en-US");
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

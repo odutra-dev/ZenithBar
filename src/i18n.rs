@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 static EN_US_JSON: &str = include_str!("../locales/en-us.json");
 static PT_BR_JSON: &str = include_str!("../locales/pt-br.json");
@@ -155,15 +155,20 @@ pub fn load_locale(culture: &str) -> I18nStrings {
     let lower = culture.to_lowercase();
     let norm = lower.replace('_', "-");
 
-    // Try loading external file if present: locales/<culture>.json
     let possible_paths = [
-        format!("locales/{}.json", norm),
-        format!("locales/{}.json", lower),
-        format!("../locales/{}.json", norm),
+        PathBuf::from(format!("locales/{}.json", norm)),
+        PathBuf::from(format!("locales/{}.json", lower)),
+        PathBuf::from(format!("../locales/{}.json", norm)),
     ];
 
-    for path_str in &possible_paths {
-        let p = Path::new(path_str);
+    load_locale_from_paths(culture, &possible_paths)
+}
+
+pub(crate) fn load_locale_from_paths(culture: &str, candidates: &[PathBuf]) -> I18nStrings {
+    let norm = culture.to_lowercase().replace('_', "-");
+
+    for path in candidates {
+        let p: &Path = path.as_path();
         if p.is_file() {
             if let Ok(content) = fs::read_to_string(p) {
                 if let Ok(parsed) = serde_json::from_str::<I18nStrings>(&content) {
@@ -179,5 +184,77 @@ pub fn load_locale(culture: &str) -> I18nStrings {
             .unwrap_or_else(|_| I18nStrings::default())
     } else {
         I18nStrings::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!(
+            "zenithbar_i18n_{}_{}_{}",
+            label,
+            std::process::id(),
+            nanos
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn embedded_locales_deserialize_with_non_empty_core_labels() {
+        let en = serde_json::from_str::<I18nStrings>(EN_US_JSON).unwrap();
+        let pt = serde_json::from_str::<I18nStrings>(PT_BR_JSON).unwrap();
+
+        for s in [&en, &pt] {
+            assert!(!s.cpu_title.trim().is_empty());
+            assert!(!s.ram_title.trim().is_empty());
+            assert!(!s.gpu_title.trim().is_empty());
+            assert!(!s.disks_title.trim().is_empty());
+            assert!(!s.network_title.trim().is_empty());
+            assert!(!s.available.trim().is_empty());
+            assert!(!s.usage.trim().is_empty());
+            assert!(!s.tray_reload_sensors.trim().is_empty());
+        }
+        assert_ne!(en.cpu_title, pt.cpu_title);
+    }
+
+    #[test]
+    fn load_locale_from_paths_normalizes_culture_and_falls_back_to_english() {
+        let pt_under = load_locale_from_paths("pt_BR", &[]);
+        let pt_upper = load_locale_from_paths("PT-pt", &[]);
+        let en = load_locale_from_paths("en-US", &[]);
+        let unknown = load_locale_from_paths("fr-FR", &[]);
+
+        let expected_pt: I18nStrings = serde_json::from_str(PT_BR_JSON).unwrap();
+        assert_eq!(pt_under.cpu_title, expected_pt.cpu_title);
+        assert_eq!(pt_upper.cpu_title, expected_pt.cpu_title);
+        assert_eq!(unknown.cpu_title, en.cpu_title);
+    }
+
+    #[test]
+    fn load_locale_from_paths_prefers_valid_external_file_and_ignores_corrupt_file() {
+        let dir = unique_temp_dir("override");
+        let valid_path = dir.join("custom.json");
+        let corrupt_path = dir.join("broken.json");
+
+        let mut custom = I18nStrings::default();
+        custom.cpu_title = "CUSTOM CPU".to_string();
+        fs::write(&valid_path, serde_json::to_string(&custom).unwrap()).unwrap();
+        fs::write(&corrupt_path, "{ broken json").unwrap();
+
+        let loaded = load_locale_from_paths("en-US", &[corrupt_path.clone(), valid_path]);
+        assert_eq!(loaded.cpu_title, "CUSTOM CPU");
+
+        let fallback = load_locale_from_paths("pt-BR", &[corrupt_path]);
+        assert_eq!(fallback.cpu_title, serde_json::from_str::<I18nStrings>(PT_BR_JSON).unwrap().cpu_title);
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }
