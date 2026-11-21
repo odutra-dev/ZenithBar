@@ -1,3 +1,107 @@
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub struct WinGpuSample {
+    pub name: String,
+    pub usage: Option<f32>,
+    pub clock_ghz: Option<f32>,
+    pub vram_used_gb: f64,
+    pub vram_total_gb: f64,
+    pub vram_percent: Option<f32>,
+    pub temperature_c: Option<f32>,
+    pub fan_percent: Option<f32>,
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn utf16_array_to_string(buf: &[u16]) -> String {
+    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
+    String::from_utf16_lossy(&buf[..len]).trim().to_string()
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn format_luid_tag(high_part: i32, low_part: u32) -> String {
+    format!("luid_0x{:08x}_0x{:08x}", high_part as u32, low_part)
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn aggregate_pdh_gpu_engine(items: &[(String, f64)], luid_tag: &str) -> Option<f32> {
+    let mut sum_3d = 0.0f64;
+    let mut max_any = 0.0f64;
+    let mut matched = false;
+    for (name, val) in items {
+        let lower = name.to_ascii_lowercase();
+        if lower.contains(luid_tag) && val.is_finite() {
+            matched = true;
+            if lower.contains("engtype_3d") {
+                sum_3d += val.max(0.0);
+            }
+            if *val > max_any {
+                max_any = *val;
+            }
+        }
+    }
+    if matched {
+        let pct = sum_3d.max(max_any).clamp(0.0, 100.0) / 100.0;
+        Some(pct as f32)
+    } else {
+        None
+    }
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn extract_pdh_gpu_vram_bytes(items: &[(String, f64)], luid_tag: &str) -> Option<f64> {
+    for (name, val) in items {
+        if name.to_ascii_lowercase().contains(luid_tag) && *val >= 0.0 && val.is_finite() {
+            return Some(*val);
+        }
+    }
+    None
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn should_replace_adapter(
+    best: Option<(bool, u64)>,
+    cand_is_hw: bool,
+    cand_vram_bytes: u64,
+) -> bool {
+    match best {
+        None => true,
+        Some((best_is_hw, best_vram)) => {
+            (cand_is_hw && !best_is_hw)
+                || (cand_is_hw == best_is_hw && cand_vram_bytes > best_vram)
+        }
+    }
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn compute_dxgi_vram(
+    dedicated_bytes: u64,
+    budget: u64,
+    current_usage: u64,
+    has_mem_info: bool,
+) -> (f64, f64, Option<f32>) {
+    const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
+    let dedicated_f = dedicated_bytes as f64;
+    if dedicated_bytes > 0 {
+        let total = dedicated_f / GIB;
+        if has_mem_info {
+            let used = current_usage as f64 / GIB;
+            let pct = (current_usage as f64 / dedicated_f).clamp(0.0, 1.0) as f32;
+            (used, total, Some(pct))
+        } else {
+            (0.0, total, None)
+        }
+    } else if has_mem_info && budget > 0 {
+        let total = budget as f64 / GIB;
+        let used = current_usage as f64 / GIB;
+        let pct = (current_usage as f64 / budget as f64).clamp(0.0, 1.0) as f32;
+        (used, total, Some(pct))
+    } else {
+        (0.0, 0.0, None)
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod win_impl {
+use super::*;
 use std::ffi::{c_char, c_int, c_uint, c_void, CStr};
 use std::mem::size_of;
 use windows::core::{w, Interface, PCWSTR};
@@ -12,17 +116,6 @@ use windows::Win32::System::Performance::{
     PdhOpenQueryW, PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_HCOUNTER, PDH_HQUERY,
     PDH_MORE_DATA,
 };
-
-pub struct WinGpuSample {
-    pub name: String,
-    pub usage: Option<f32>,
-    pub clock_ghz: Option<f32>,
-    pub vram_used_gb: f64,
-    pub vram_total_gb: f64,
-    pub vram_percent: Option<f32>,
-    pub temperature_c: Option<f32>,
-    pub fan_percent: Option<f32>,
-}
 
 struct SelectedAdapter {
     name: String,
@@ -208,11 +301,6 @@ impl WindowsGpuMonitor {
     }
 }
 
-fn utf16_array_to_string(buf: &[u16]) -> String {
-    let len = buf.iter().position(|&c| c == 0).unwrap_or(buf.len());
-    String::from_utf16_lossy(&buf[..len]).trim().to_string()
-}
-
 fn query_dxgi_primary_adapter() -> Option<SelectedAdapter> {
     unsafe {
         let factory: IDXGIFactory1 = CreateDXGIFactory1().ok()?;
@@ -246,24 +334,12 @@ fn query_dxgi_primary_adapter() -> Option<SelectedAdapter> {
                 })
                 .is_some();
 
-            let dedicated_bytes = desc.DedicatedVideoMemory as f64;
-            let (vram_used_gb, vram_total_gb, vram_percent) = if dedicated_bytes > 0.0 {
-                let total = dedicated_bytes / (1024.0 * 1024.0 * 1024.0);
-                if has_mem_info {
-                    let used = mem_info.CurrentUsage as f64 / (1024.0 * 1024.0 * 1024.0);
-                    let pct = (mem_info.CurrentUsage as f64 / dedicated_bytes).clamp(0.0, 1.0) as f32;
-                    (used, total, Some(pct))
-                } else {
-                    (0.0, total, None)
-                }
-            } else if has_mem_info && mem_info.Budget > 0 {
-                let total = mem_info.Budget as f64 / (1024.0 * 1024.0 * 1024.0);
-                let used = mem_info.CurrentUsage as f64 / (1024.0 * 1024.0 * 1024.0);
-                let pct = (mem_info.CurrentUsage as f64 / mem_info.Budget as f64).clamp(0.0, 1.0) as f32;
-                (used, total, Some(pct))
-            } else {
-                (0.0, 0.0, None)
-            };
+            let (vram_used_gb, vram_total_gb, vram_percent) = compute_dxgi_vram(
+                desc.DedicatedVideoMemory as u64,
+                mem_info.Budget,
+                mem_info.CurrentUsage,
+                has_mem_info,
+            );
 
             let candidate = SelectedAdapter {
                 name,
@@ -274,14 +350,11 @@ fn query_dxgi_primary_adapter() -> Option<SelectedAdapter> {
                 vram_percent,
             };
 
-            let replace = match &best {
-                None => true,
-                Some((best_is_hw, best_vram, _)) => {
-                    let cand_is_hw = !is_software;
-                    (cand_is_hw && !*best_is_hw)
-                        || (cand_is_hw == *best_is_hw && desc.DedicatedVideoMemory > *best_vram)
-                }
-            };
+            let replace = should_replace_adapter(
+                best.as_ref().map(|(hw, v, _)| (*hw, *v as u64)),
+                !is_software,
+                desc.DedicatedVideoMemory as u64,
+            );
 
             if replace {
                 best = Some((!is_software, desc.DedicatedVideoMemory, candidate));
@@ -350,44 +423,20 @@ impl PdhGpuQuery {
                 return (None, None);
             }
 
-            let luid_tag = format!("luid_0x{:08x}_0x{:08x}", luid.HighPart as u32, luid.LowPart);
-            let mut usage_pct: Option<f32> = None;
-            let mut vram_used_bytes: Option<f64> = None;
+            let luid_tag = format_luid_tag(luid.HighPart, luid.LowPart);
+            let usage_pct = if !self.hcounter_engine.is_invalid() {
+                read_pdh_double_array(self.hcounter_engine)
+                    .and_then(|items| aggregate_pdh_gpu_engine(&items, &luid_tag))
+            } else {
+                None
+            };
 
-            if !self.hcounter_engine.is_invalid() {
-                if let Some(items) = read_pdh_double_array(self.hcounter_engine) {
-                    let mut sum_3d = 0.0f64;
-                    let mut max_any = 0.0f64;
-                    let mut matched = false;
-                    for (name, val) in items {
-                        let lower = name.to_ascii_lowercase();
-                        if lower.contains(&luid_tag) {
-                            matched = true;
-                            if lower.contains("engtype_3d") {
-                                sum_3d += val.max(0.0);
-                            }
-                            if val > max_any {
-                                max_any = val;
-                            }
-                        }
-                    }
-                    if matched {
-                        let pct = sum_3d.max(max_any).clamp(0.0, 100.0) / 100.0;
-                        usage_pct = Some(pct as f32);
-                    }
-                }
-            }
-
-            if !self.hcounter_mem.is_invalid() {
-                if let Some(items) = read_pdh_double_array(self.hcounter_mem) {
-                    for (name, val) in items {
-                        if name.to_ascii_lowercase().contains(&luid_tag) && val >= 0.0 {
-                            vram_used_bytes = Some(val);
-                            break;
-                        }
-                    }
-                }
-            }
+            let vram_used_bytes = if !self.hcounter_mem.is_invalid() {
+                read_pdh_double_array(self.hcounter_mem)
+                    .and_then(|items| extract_pdh_gpu_vram_bytes(&items, &luid_tag))
+            } else {
+                None
+            };
 
             (usage_pct, vram_used_bytes)
         }
@@ -404,7 +453,7 @@ impl Drop for PdhGpuQuery {
     }
 }
 
-pub(super) unsafe fn read_pdh_double_array(hcounter: PDH_HCOUNTER) -> Option<Vec<(String, f64)>> {
+pub unsafe fn read_pdh_double_array(hcounter: PDH_HCOUNTER) -> Option<Vec<(String, f64)>> {
     unsafe {
         let mut buf_size = 0u32;
         let mut item_count = 0u32;
@@ -1571,5 +1620,74 @@ impl Drop for AdlApi {
             }
             let _ = FreeLibrary(self.module);
         }
+    }
+}
+}
+
+#[cfg(target_os = "windows")]
+pub use win_impl::{find_nvidia_driverstore_file, WindowsGpuMonitor};
+
+#[cfg(target_os = "windows")]
+pub(super) use win_impl::read_pdh_double_array;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn utf16_array_to_string_stops_at_nul_and_trims() {
+        let mut buf: Vec<u16> = "  AMD Radeon RX 6750 XT  ".encode_utf16().collect();
+        buf.push(0);
+        buf.extend("extra".encode_utf16());
+        assert_eq!(utf16_array_to_string(&buf), "AMD Radeon RX 6750 XT");
+    }
+
+    #[test]
+    fn pdh_gpu_engine_and_vram_filter_by_luid_and_clamp() {
+        let tag = format_luid_tag(0, 0x0001_2A3B);
+        assert_eq!(tag, "luid_0x00000000_0x00012a3b");
+
+        let engine_items = vec![
+            (format!("pid_123_{}_phys_0_eng_0_engtype_3D", tag), 35.0),
+            (format!("pid_456_{}_phys_0_eng_0_engtype_3D", tag), 20.0),
+            (format!("pid_789_{}_phys_0_eng_1_engtype_VideoDecode", tag), 10.0),
+            ("pid_999_luid_0x00000000_0x00099999_engtype_3D".to_string(), 99.0),
+        ];
+        let usage = aggregate_pdh_gpu_engine(&engine_items, &tag).unwrap();
+        assert!((usage - 0.55).abs() < 1e-4);
+
+        let vram_items = vec![
+            ("pid_999_luid_0x00000000_0x00099999".to_string(), 999.0),
+            (format!("pid_123_{}_phys_0", tag), 2_147_483_648.0),
+        ];
+        assert_eq!(
+            extract_pdh_gpu_vram_bytes(&vram_items, &tag),
+            Some(2_147_483_648.0)
+        );
+    }
+
+    #[test]
+    fn adapter_selection_prefers_hardware_over_software_and_larger_vram() {
+        assert!(should_replace_adapter(None, false, 0));
+        assert!(should_replace_adapter(Some((false, 8_000_000_000)), true, 2_000_000_000));
+        assert!(!should_replace_adapter(Some((true, 2_000_000_000)), false, 16_000_000_000));
+        assert!(should_replace_adapter(Some((true, 4_000_000_000)), true, 12_000_000_000));
+        assert!(!should_replace_adapter(Some((true, 12_000_000_000)), true, 4_000_000_000));
+    }
+
+    #[test]
+    fn compute_dxgi_vram_handles_dedicated_and_shared_budget() {
+        let gib = 1024 * 1024 * 1024u64;
+        let (used, total, pct) = compute_dxgi_vram(12 * gib, 0, 3 * gib, true);
+        assert!((used - 3.0).abs() < 1e-6);
+        assert!((total - 12.0).abs() < 1e-6);
+        assert!((pct.unwrap() - 0.25).abs() < 1e-6);
+
+        let (used_shared, total_shared, pct_shared) = compute_dxgi_vram(0, 8 * gib, 2 * gib, true);
+        assert!((used_shared - 2.0).abs() < 1e-6);
+        assert!((total_shared - 8.0).abs() < 1e-6);
+        assert!((pct_shared.unwrap() - 0.25).abs() < 1e-6);
+
+        assert_eq!(compute_dxgi_vram(0, 0, 0, false), (0.0, 0.0, None));
     }
 }

@@ -2,13 +2,9 @@ use std::collections::VecDeque;
 use std::time::Instant;
 use sysinfo::{Components, CpuRefreshKind, Disks, MemoryRefreshKind, Networks, RefreshKind, System};
 
-#[cfg(target_os = "windows")]
 mod disk_win;
-#[cfg(target_os = "windows")]
 mod gpu_win;
-#[cfg(target_os = "windows")]
 mod shm_win;
-#[cfg(target_os = "windows")]
 mod wmi_win;
 
 const HISTORY_SIZE: usize = 12;
@@ -619,6 +615,44 @@ fn nvidia_smi_executable() -> String {
     "nvidia-smi".to_string()
 }
 
+fn parse_nvidia_smi_csv_line(line: &str) -> Option<RawGpuTelemetry> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let cols: Vec<&str> = trimmed.split(',').collect();
+    if cols.len() < 7 {
+        return None;
+    }
+
+    let name = cols[0].trim().to_string();
+    let usage = parse_optional_f32(cols[1]).map(|v| (v / 100.0).clamp(0.0, 1.0));
+    let clock_ghz = parse_optional_f32(cols[2]).map(|mhz| mhz / 1000.0);
+    let vram_used_mib = parse_optional_f32(cols[3]).map(|v| v as f64).unwrap_or(0.0);
+    let vram_total_mib = parse_optional_f32(cols[4]).map(|v| v as f64).unwrap_or(0.0);
+    let vram_used_gb = vram_used_mib / 1024.0;
+    let vram_total_gb = vram_total_mib / 1024.0;
+    let vram_percent = if vram_total_mib > 0.0 {
+        Some((vram_used_mib / vram_total_mib).clamp(0.0, 1.0) as f32)
+    } else {
+        None
+    };
+    let temperature_c = parse_optional_f32(cols[5]);
+    let fan_percent = parse_optional_f32(cols[6]).map(|v| (v / 100.0).clamp(0.0, 1.0));
+
+    Some(RawGpuTelemetry {
+        name,
+        usage,
+        clock_ghz,
+        vram_used_gb,
+        vram_total_gb,
+        vram_percent,
+        temperature_c,
+        fan_percent,
+    })
+}
+
 fn query_nvidia_smi(available_cache: &mut Option<bool>) -> Option<RawGpuTelemetry> {
     let mut cmd = std::process::Command::new(nvidia_smi_executable());
     cmd.args([
@@ -653,41 +687,8 @@ fn query_nvidia_smi(available_cache: &mut Option<bool>) -> Option<RawGpuTelemetr
     };
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    let line = stdout.lines().next()?.trim();
-    if line.is_empty() {
-        return None;
-    }
-
-    let cols: Vec<&str> = line.split(',').collect();
-    if cols.len() < 7 {
-        return None;
-    }
-
-    let name = cols[0].trim().to_string();
-    let usage = parse_optional_f32(cols[1]).map(|v| (v / 100.0).clamp(0.0, 1.0));
-    let clock_ghz = parse_optional_f32(cols[2]).map(|mhz| mhz / 1000.0);
-    let vram_used_mib = parse_optional_f32(cols[3]).map(|v| v as f64).unwrap_or(0.0);
-    let vram_total_mib = parse_optional_f32(cols[4]).map(|v| v as f64).unwrap_or(0.0);
-    let vram_used_gb = vram_used_mib / 1024.0;
-    let vram_total_gb = vram_total_mib / 1024.0;
-    let vram_percent = if vram_total_mib > 0.0 {
-        Some((vram_used_mib / vram_total_mib) as f32)
-    } else {
-        None
-    };
-    let temperature_c = parse_optional_f32(cols[5]);
-    let fan_percent = parse_optional_f32(cols[6]).map(|v| (v / 100.0).clamp(0.0, 1.0));
-
-    Some(RawGpuTelemetry {
-        name,
-        usage,
-        clock_ghz,
-        vram_used_gb,
-        vram_total_gb,
-        vram_percent,
-        temperature_c,
-        fan_percent,
-    })
+    let line = stdout.lines().next()?;
+    parse_nvidia_smi_csv_line(line)
 }
 
 #[cfg(not(target_os = "windows"))]
@@ -929,5 +930,84 @@ mod tests {
         assert_eq!(ip, "192.168.15.5");
         assert_eq!(rx, 50_000);
         assert_eq!(tx, 10_000);
+    }
+
+    #[test]
+    fn parse_optional_f32_handles_na_brackets_and_numbers() {
+        assert_eq!(parse_optional_f32(""), None);
+        assert_eq!(parse_optional_f32("  N/A "), None);
+        assert_eq!(parse_optional_f32("[Not Supported]"), None);
+        assert_eq!(parse_optional_f32(" 63.5 "), Some(63.5));
+    }
+
+    #[test]
+    fn parse_nvidia_smi_csv_line_parses_metrics_and_missing_fields() {
+        let parsed = parse_nvidia_smi_csv_line(
+            "NVIDIA GeForce RTX 4070, 35, 2550, 2048, 12288, 52, [Not Supported]",
+        )
+        .expect("valid csv line must parse");
+
+        assert_eq!(parsed.name, "NVIDIA GeForce RTX 4070");
+        assert!((parsed.usage.unwrap() - 0.35).abs() < 1e-4);
+        assert!((parsed.clock_ghz.unwrap() - 2.55).abs() < 1e-4);
+        assert!((parsed.vram_used_gb - 2.0).abs() < 1e-6);
+        assert!((parsed.vram_total_gb - 12.0).abs() < 1e-6);
+        assert!((parsed.vram_percent.unwrap() - (2048.0 / 12288.0)).abs() < 1e-4);
+        assert_eq!(parsed.temperature_c, Some(52.0));
+        assert_eq!(parsed.fan_percent, None);
+
+        assert!(parse_nvidia_smi_csv_line("").is_none());
+        assert!(parse_nvidia_smi_csv_line("only,two,cols").is_none());
+    }
+
+    #[test]
+    fn network_helpers_handle_virtual_fallback_and_empty_candidates() {
+        assert!(is_loopback_name("lo"));
+        assert!(is_loopback_name("Loopback Pseudo-Interface 1"));
+        assert!(!is_loopback_name("eth0"));
+
+        assert!(is_virtual_interface("docker0"));
+        assert!(is_virtual_interface("Tailscale"));
+        assert!(!is_virtual_interface("Wi-Fi"));
+
+        let empty = select_primary_network(&[]);
+        assert_eq!(empty, ("Rede".to_string(), "127.0.0.1".to_string(), 0, 0));
+
+        // When no physical adapter has IPv4, falls back to virtual non-loopback
+        let virtual_only = vec![
+            NetCandidate {
+                name: "lo".to_string(),
+                ipv4: Some("127.0.0.1".to_string()),
+                rx_bytes: 999,
+                tx_bytes: 999,
+            },
+            NetCandidate {
+                name: "vEthernet (Default Switch)".to_string(),
+                ipv4: Some("172.20.0.1".to_string()),
+                rx_bytes: 1200,
+                tx_bytes: 300,
+            },
+        ];
+        let (name, ip, rx, tx) = select_primary_network(&virtual_only);
+        assert_eq!(name, "vEthernet (Default Switch)");
+        assert_eq!(ip, "172.20.0.1");
+        assert_eq!(rx, 1200);
+        assert_eq!(tx, 300);
+    }
+
+    #[test]
+    fn snapshot_formats_uptime_and_sorts_disks() {
+        let mut engine = TelemetryEngine::new();
+        engine.external_ip = "127.0.0.1".to_string();
+        engine.last_ext_ip_check = Instant::now();
+        engine.nvidia_smi_available = Some(false);
+
+        let snap = engine.snapshot();
+        assert!(snap.uptime.contains('h') && snap.uptime.contains('m'));
+        assert!(snap.mem.percent >= 0.0 && snap.mem.percent <= 1.0);
+        assert!(!snap.cpu.name.is_empty());
+        for w in snap.disks.windows(2) {
+            assert!(w[0].mount.to_ascii_lowercase() <= w[1].mount.to_ascii_lowercase());
+        }
     }
 }
