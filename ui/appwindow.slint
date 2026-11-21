@@ -64,6 +64,7 @@ component EditableLabel inherits Rectangle {
     in property <color> accent_color: #38bdf8;
     in property <color> idle_bg: transparent;
     in property <bool> align_right: false;
+    in property <bool> multiline: true;
     callback committed(string);
 
     private property <bool> editing: false;
@@ -103,7 +104,8 @@ component EditableLabel inherits Rectangle {
             font-weight: root.font_weight;
             color: ta.has-hover ? #f8fafc : root.text_color;
             horizontal-alignment: root.align_right ? right : left;
-            wrap: word-wrap;
+            wrap: root.multiline ? word-wrap : no-wrap;
+            overflow: root.multiline ? clip : elide;
             min-width: 0px;
             horizontal-stretch: 1;
             vertical-alignment: center;
@@ -382,7 +384,6 @@ export component AppWindow inherits Window {
             HorizontalLayout {
                 padding: 8px;
                 spacing: 6px;
-                alignment: space-between;
 
                 VerticalLayout {
                     alignment: center;
@@ -393,21 +394,30 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         spacing: 6px;
                         min-width: 0px;
+                        horizontal-stretch: 1;
                         Text {
                             text: root.time_str;
                             font-size: root.sidebar_width_px < 220 ? 15px : 18px;
                             font-weight: 800;
                             color: #ffffff;
+                            horizontal-stretch: 0;
                             vertical-alignment: center;
                         }
-                        if root.show_machine_name : EditableLabel {
-                            text: root.hostname;
-                            font_size: root.sidebar_width_px < 220 ? 8.5px : 9.5px;
-                            font_weight: 600;
-                            text_color: #38bdf8;
-                            accent_color: #38bdf8;
+                        if root.show_machine_name : VerticalLayout {
+                            alignment: center;
+                            min-width: 0px;
                             horizontal-stretch: 1;
-                            committed(val) => { root.request_set_custom_hostname(val); }
+
+                            EditableLabel {
+                                text: root.hostname;
+                                font_size: root.sidebar_width_px < 220 ? 8.5px : 9.5px;
+                                font_weight: 600;
+                                text_color: #38bdf8;
+                                accent_color: #38bdf8;
+                                multiline: false;
+                                horizontal-stretch: 1;
+                                committed(val) => { root.request_set_custom_hostname(val); }
+                            }
                         }
                     }
 
@@ -430,6 +440,7 @@ export component AppWindow inherits Window {
 
                 if !root.collapse_menu_bar : HorizontalLayout {
                     alignment: center;
+                    horizontal-stretch: 0;
                     spacing: 4px;
 
                     // Settings gear button
