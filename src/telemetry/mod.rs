@@ -4,6 +4,8 @@ use sysinfo::{Components, CpuRefreshKind, Disks, MemoryRefreshKind, Networks, Re
 
 #[cfg(target_os = "windows")]
 mod gpu_win;
+#[cfg(target_os = "windows")]
+mod wmi_win;
 
 const HISTORY_SIZE: usize = 12;
 
@@ -93,6 +95,8 @@ pub struct TelemetryEngine {
     nvidia_smi_available: Option<bool>,
     #[cfg(target_os = "windows")]
     win_gpu: gpu_win::WindowsGpuMonitor,
+    #[cfg(target_os = "windows")]
+    win_wmi: wmi_win::WindowsWmiMonitor,
 }
 
 impl TelemetryEngine {
@@ -151,6 +155,8 @@ impl TelemetryEngine {
             nvidia_smi_available: None,
             #[cfg(target_os = "windows")]
             win_gpu: gpu_win::WindowsGpuMonitor::new(),
+            #[cfg(target_os = "windows")]
+            win_wmi: wmi_win::WindowsWmiMonitor::new(),
         }
     }
 
@@ -166,11 +172,48 @@ impl TelemetryEngine {
             }
         }
 
+        #[allow(unused_mut)]
+        let mut cpu = self.sample_cpu();
+        #[allow(unused_mut)]
+        let mut gpu = self.sample_gpu();
+
+        #[cfg(target_os = "windows")]
+        {
+            let need_cpu_temp = cpu.temperature_c.is_none();
+            let need_gpu = gpu.temperature_c.is_none()
+                || gpu.clock_ghz.is_none()
+                || gpu.usage.is_none()
+                || gpu.fan_percent.is_none();
+            if need_cpu_temp || need_gpu {
+                let wmi = self.win_wmi.sample(need_cpu_temp, need_gpu);
+                if cpu.temperature_c.is_none() {
+                    cpu.temperature_c = wmi.cpu_temp_c;
+                }
+                if gpu.temperature_c.is_none() {
+                    gpu.temperature_c = wmi.gpu_temp_c;
+                }
+                if gpu.clock_ghz.is_none() {
+                    gpu.clock_ghz = wmi.gpu_clock_ghz;
+                }
+                if gpu.usage.is_none() {
+                    gpu.usage = wmi.gpu_usage;
+                    if let Some(u) = gpu.usage {
+                        if let Some(last) = gpu.history.last_mut() {
+                            *last = u.clamp(0.0, 1.0);
+                        }
+                    }
+                }
+                if gpu.fan_percent.is_none() {
+                    gpu.fan_percent = wmi.gpu_fan_percent;
+                }
+            }
+        }
+
         TelemetrySnapshot {
             hostname: self.hostname.clone(),
-            cpu: self.sample_cpu(),
+            cpu,
             mem: self.sample_memory(),
-            gpu: self.sample_gpu(),
+            gpu,
             disks: self.sample_disks(),
             net: self.sample_network(),
             uptime: self.get_uptime_string(),
