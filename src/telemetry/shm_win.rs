@@ -151,7 +151,7 @@ fn parse_hwinfo_readings_slice(bytes: &[u8], offset: usize, elem_size: usize, co
     Some(out)
 }
 
-#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+#[cfg(test)]
 pub(crate) fn parse_hwinfo_shm_bytes(bytes: &[u8]) -> Option<ShmSensorSample> {
     if bytes.len() < size_of::<HwInfoHeader>() {
         return None;
