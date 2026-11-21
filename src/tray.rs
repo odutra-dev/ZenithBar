@@ -7,6 +7,7 @@ pub struct TrayEvents {
     pub reload_sensors: bool,
     pub update_pos: bool,
     pub show_window: bool,
+    pub toggle_appbar: bool,
     pub exit: bool,
 }
 
@@ -37,7 +38,10 @@ pub mod win32 {
 
     const WM_TRAYICON: u32 = WM_APP + 42;
     const WM_HOTKEY: u32 = 0x0312;
-    const HOTKEY_ID: i32 = 100;
+    const HOTKEY_TOGGLE_ID: i32 = 100;
+    const HOTKEY_EDGE_ID: i32 = 101;
+    const HOTKEY_SCREEN_ID: i32 = 102;
+    const HOTKEY_APPBAR_ID: i32 = 103;
     const ID_TOGGLE_VISIBILITY: usize = 1001;
     const ID_SETTINGS: usize = 1002;
     const ID_TOGGLE_SIDE: usize = 1003;
@@ -59,6 +63,7 @@ pub mod win32 {
     static SHOULD_RELOAD_SENSORS: AtomicBool = AtomicBool::new(false);
     static SHOULD_UPDATE_POS: AtomicBool = AtomicBool::new(false);
     static SHOULD_SHOW_WINDOW: AtomicBool = AtomicBool::new(false);
+    static SHOULD_TOGGLE_APPBAR: AtomicBool = AtomicBool::new(false);
     static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
     static IS_ALWAYS_TOP: AtomicBool = AtomicBool::new(true);
     static TRAY_CULTURE: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
@@ -148,8 +153,11 @@ pub mod win32 {
                         TRAY_SUBCLASS_ID,
                         0,
                     );
-                    // Register Global Hotkey: Ctrl + Shift + S
-                    let _ = RegisterHotKey(self.hwnd, HOTKEY_ID, 0x0006, 0x53);
+                    // Register Global Hotkeys: Ctrl + Shift + S / E / M / R
+                    let _ = RegisterHotKey(self.hwnd, HOTKEY_TOGGLE_ID, 0x0006, 0x53);
+                    let _ = RegisterHotKey(self.hwnd, HOTKEY_EDGE_ID, 0x0006, 0x45);
+                    let _ = RegisterHotKey(self.hwnd, HOTKEY_SCREEN_ID, 0x0006, 0x4D);
+                    let _ = RegisterHotKey(self.hwnd, HOTKEY_APPBAR_ID, 0x0006, 0x52);
                 }
 
                 self.is_added
@@ -165,6 +173,7 @@ pub mod win32 {
                 reload_sensors: SHOULD_RELOAD_SENSORS.swap(false, Ordering::SeqCst),
                 update_pos: SHOULD_UPDATE_POS.swap(false, Ordering::SeqCst),
                 show_window: SHOULD_SHOW_WINDOW.swap(false, Ordering::SeqCst),
+                toggle_appbar: SHOULD_TOGGLE_APPBAR.swap(false, Ordering::SeqCst),
                 exit: SHOULD_EXIT.swap(false, Ordering::SeqCst),
             }
         }
@@ -173,7 +182,9 @@ pub mod win32 {
         pub fn remove(&mut self) {
             if self.is_added && !self.hwnd.0.is_null() {
                 unsafe {
-                    let _ = UnregisterHotKey(self.hwnd, HOTKEY_ID);
+                    for id in [HOTKEY_TOGGLE_ID, HOTKEY_EDGE_ID, HOTKEY_SCREEN_ID, HOTKEY_APPBAR_ID] {
+                        let _ = UnregisterHotKey(self.hwnd, id);
+                    }
                     let mut nid = NOTIFYICONDATAW {
                         cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
                         hWnd: self.hwnd,
@@ -203,7 +214,13 @@ pub mod win32 {
         _ref_data: usize,
     ) -> LRESULT {
         if msg == WM_HOTKEY {
-            SHOULD_TOGGLE_VISIBILITY.store(true, Ordering::SeqCst);
+            match wparam.0 as i32 {
+                HOTKEY_TOGGLE_ID => SHOULD_TOGGLE_VISIBILITY.store(true, Ordering::SeqCst),
+                HOTKEY_EDGE_ID => SHOULD_TOGGLE_SIDE.store(true, Ordering::SeqCst),
+                HOTKEY_SCREEN_ID => SHOULD_CYCLE_SCREEN.store(true, Ordering::SeqCst),
+                HOTKEY_APPBAR_ID => SHOULD_TOGGLE_APPBAR.store(true, Ordering::SeqCst),
+                _ => {}
+            }
             return LRESULT(0);
         }
 
@@ -374,6 +391,7 @@ pub mod win32 {
     pub static SHOULD_RELOAD_SENSORS: AtomicBool = AtomicBool::new(false);
     pub static SHOULD_UPDATE_POS: AtomicBool = AtomicBool::new(false);
     pub static SHOULD_SHOW_WINDOW: AtomicBool = AtomicBool::new(false);
+    pub static SHOULD_TOGGLE_APPBAR: AtomicBool = AtomicBool::new(false);
     pub static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
 
     pub fn set_always_top_state(_always_top: bool) {}
@@ -400,6 +418,7 @@ pub mod win32 {
                 reload_sensors: SHOULD_RELOAD_SENSORS.swap(false, Ordering::SeqCst),
                 update_pos: SHOULD_UPDATE_POS.swap(false, Ordering::SeqCst),
                 show_window: SHOULD_SHOW_WINDOW.swap(false, Ordering::SeqCst),
+                toggle_appbar: SHOULD_TOGGLE_APPBAR.swap(false, Ordering::SeqCst),
                 exit: SHOULD_EXIT.swap(false, Ordering::SeqCst),
             }
         }

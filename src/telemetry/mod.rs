@@ -3,6 +3,8 @@ use std::time::Instant;
 use sysinfo::{Components, CpuRefreshKind, Disks, MemoryRefreshKind, Networks, RefreshKind, System};
 
 #[cfg(target_os = "windows")]
+mod disk_win;
+#[cfg(target_os = "windows")]
 mod gpu_win;
 #[cfg(target_os = "windows")]
 mod wmi_win;
@@ -82,6 +84,7 @@ pub struct TelemetryEngine {
     hostname: String,
     external_ip: String,
     last_net_check: Instant,
+    last_disk_check: Instant,
     last_ext_ip_check: Instant,
     prev_rx_bytes: u64,
     prev_tx_bytes: u64,
@@ -93,6 +96,8 @@ pub struct TelemetryEngine {
     net_history: VecDeque<f32>,
 
     nvidia_smi_available: Option<bool>,
+    #[cfg(target_os = "windows")]
+    win_disk: Option<disk_win::WindowsDiskIoMonitor>,
     #[cfg(target_os = "windows")]
     win_gpu: gpu_win::WindowsGpuMonitor,
     #[cfg(target_os = "windows")]
@@ -145,6 +150,7 @@ impl TelemetryEngine {
             hostname,
             external_ip: String::from("--"),
             last_net_check: Instant::now(),
+            last_disk_check: Instant::now(),
             last_ext_ip_check: Instant::now().checked_sub(std::time::Duration::from_secs(3600)).unwrap_or_else(Instant::now),
             prev_rx_bytes: 0,
             prev_tx_bytes: 0,
@@ -154,9 +160,34 @@ impl TelemetryEngine {
             net_history,
             nvidia_smi_available: None,
             #[cfg(target_os = "windows")]
+            win_disk: disk_win::WindowsDiskIoMonitor::new(),
+            #[cfg(target_os = "windows")]
             win_gpu: gpu_win::WindowsGpuMonitor::new(),
             #[cfg(target_os = "windows")]
             win_wmi: wmi_win::WindowsWmiMonitor::new(),
+        }
+    }
+
+    pub fn reload_sensors(&mut self) {
+        self.disks = Disks::new_with_refreshed_list()
+            .or_else(|_| Disks::new())
+            .unwrap_or_else(|_| Disks::new_with_refreshed_list_specifics(sysinfo::DiskRefreshKind::nothing()).unwrap());
+        self.networks = Networks::new_with_refreshed_list()
+            .or_else(|_| Networks::new())
+            .unwrap_or_else(|_| Networks::new().unwrap());
+        self.components = Components::new_with_refreshed_list()
+            .or_else(|_| Components::new())
+            .unwrap_or_else(|_| Components::new().unwrap());
+        self.nvidia_smi_available = None;
+        self.external_ip = String::from("--");
+        self.last_ext_ip_check = Instant::now()
+            .checked_sub(std::time::Duration::from_secs(3600))
+            .unwrap_or_else(Instant::now);
+        #[cfg(target_os = "windows")]
+        {
+            self.win_disk = disk_win::WindowsDiskIoMonitor::new();
+            self.win_gpu = gpu_win::WindowsGpuMonitor::new();
+            self.win_wmi = wmi_win::WindowsWmiMonitor::new();
         }
     }
 
@@ -301,6 +332,13 @@ impl TelemetryEngine {
     }
 
     pub fn sample_disks(&mut self) -> Vec<DiskSnapshot> {
+        let now = Instant::now();
+        let elapsed = now.duration_since(self.last_disk_check).as_secs_f64().max(0.1);
+        self.last_disk_check = now;
+
+        #[cfg(target_os = "windows")]
+        let win_io = self.win_disk.as_mut().map(|d| d.sample()).unwrap_or_default();
+
         let mut results = Vec::new();
         for disk in &self.disks {
             let total = disk.total_space() as f64 / (1024.0 * 1024.0 * 1024.0);
@@ -311,16 +349,38 @@ impl TelemetryEngine {
             let name = disk.name().to_string_lossy().to_string();
             let mount = disk.mount_point().to_string_lossy().to_string();
 
+            #[cfg(target_os = "windows")]
+            let (read_mb_s, write_mb_s) = {
+                let key = disk_win::normalize_drive_key(&mount);
+                win_io.get(&key).copied().unwrap_or((0.0, 0.0))
+            };
+
+            #[cfg(not(target_os = "windows"))]
+            let (read_mb_s, write_mb_s) = {
+                let io = disk.usage();
+                const MIB: f64 = 1024.0 * 1024.0;
+                (
+                    io.read_bytes as f64 / (elapsed * MIB),
+                    io.written_bytes as f64 / (elapsed * MIB),
+                )
+            };
+
             results.push(DiskSnapshot {
                 name: if name.is_empty() { mount.clone() } else { name },
                 mount,
                 used_gb: used,
                 total_gb: total,
                 percent,
-                read_mb_s: 0.0,
-                write_mb_s: 0.0,
+                read_mb_s,
+                write_mb_s,
             });
         }
+        #[cfg(not(target_os = "windows"))]
+        let _ = elapsed;
+        #[cfg(target_os = "windows")]
+        let _ = elapsed;
+
+        results.sort_by(|a, b| a.mount.to_ascii_lowercase().cmp(&b.mount.to_ascii_lowercase()));
         results
     }
 
@@ -329,28 +389,25 @@ impl TelemetryEngine {
         let elapsed = now.duration_since(self.last_net_check).as_secs_f64().max(0.1);
         self.last_net_check = now;
 
-        let mut current_rx: u64 = 0;
-        let mut current_tx: u64 = 0;
-        let mut active_name = String::from("Rede");
-        let mut ip_addr = String::from("127.0.0.1");
-
-        for (interface_name, data) in &self.networks {
-            let rx = data.total_received();
-            let tx = data.total_transmitted();
-            current_rx += rx;
-            current_tx += tx;
-
-            let name_str = interface_name.to_string_lossy();
-            if !name_str.contains("Loopback") && !name_str.contains("vEthernet") {
-                active_name = name_str.to_string();
-                for ip in data.ip_networks() {
-                    if ip.addr.is_ipv4() && !ip.addr.is_loopback() {
-                        ip_addr = ip.addr.to_string();
-                        break;
-                    }
+        let candidates: Vec<NetCandidate> = self
+            .networks
+            .iter()
+            .map(|(interface_name, data)| {
+                let ipv4 = data
+                    .ip_networks()
+                    .iter()
+                    .find(|ip| ip.addr.is_ipv4() && !ip.addr.is_loopback())
+                    .map(|ip| ip.addr.to_string());
+                NetCandidate {
+                    name: interface_name.to_string_lossy().to_string(),
+                    ipv4,
+                    rx_bytes: data.total_received(),
+                    tx_bytes: data.total_transmitted(),
                 }
-            }
-        }
+            })
+            .collect();
+
+        let (active_name, ip_addr, current_rx, current_tx) = select_primary_network(&candidates);
 
         let delta_rx = if self.prev_rx_bytes > 0 && current_rx >= self.prev_rx_bytes {
             current_rx - self.prev_rx_bytes
@@ -675,6 +732,90 @@ fn query_linux_drm_gpu() -> Option<RawGpuTelemetry> {
     None
 }
 
+struct NetCandidate {
+    name: String,
+    ipv4: Option<String>,
+    rx_bytes: u64,
+    tx_bytes: u64,
+}
+
+fn is_loopback_name(name: &str) -> bool {
+    let l = name.to_ascii_lowercase();
+    l == "lo" || l.contains("loopback")
+}
+
+fn is_virtual_interface(name: &str) -> bool {
+    let l = name.to_ascii_lowercase();
+    [
+        "loopback",
+        "vethernet",
+        "hyper-v",
+        "vmware",
+        "vbox",
+        "virtual",
+        "wsl",
+        "docker",
+        "br-",
+        "veth",
+        "tailscale",
+        "zerotier",
+        "teredo",
+        "isatap",
+        "pseudo",
+        "tun",
+        "tap",
+    ]
+    .iter()
+    .any(|kw| l.contains(kw))
+        || l == "lo"
+}
+
+fn select_primary_network(candidates: &[NetCandidate]) -> (String, String, u64, u64) {
+    let has_physical = candidates
+        .iter()
+        .any(|c| !is_virtual_interface(&c.name) && c.ipv4.is_some());
+
+    let mut total_rx: u64 = 0;
+    let mut total_tx: u64 = 0;
+    for c in candidates {
+        if is_loopback_name(&c.name) {
+            continue;
+        }
+        if has_physical && is_virtual_interface(&c.name) {
+            continue;
+        }
+        total_rx = total_rx.saturating_add(c.rx_bytes);
+        total_tx = total_tx.saturating_add(c.tx_bytes);
+    }
+
+    let best = candidates
+        .iter()
+        .filter(|c| !is_loopback_name(&c.name))
+        .max_by(|a, b| {
+            let key_a = (
+                !is_virtual_interface(&a.name),
+                a.ipv4.is_some(),
+                a.rx_bytes.saturating_add(a.tx_bytes),
+            );
+            let key_b = (
+                !is_virtual_interface(&b.name),
+                b.ipv4.is_some(),
+                b.rx_bytes.saturating_add(b.tx_bytes),
+            );
+            key_a.cmp(&key_b).then_with(|| b.name.cmp(&a.name))
+        });
+
+    match best {
+        Some(b) => (
+            b.name.clone(),
+            b.ipv4.clone().unwrap_or_else(|| "127.0.0.1".to_string()),
+            total_rx,
+            total_tx,
+        ),
+        None => ("Rede".to_string(), "127.0.0.1".to_string(), total_rx, total_tx),
+    }
+}
+
 fn fetch_external_ip() -> String {
     use std::io::{Read, Write};
     use std::net::TcpStream;
@@ -723,5 +864,34 @@ mod tests {
             assert_eq!(snap.gpu.history.len(), HISTORY_SIZE);
             assert_eq!(snap.net.history.len(), HISTORY_SIZE);
         }
+    }
+
+    #[test]
+    fn select_primary_network_prefers_physical_ipv4_deterministically() {
+        let candidates = vec![
+            NetCandidate {
+                name: "vEthernet (WSL)".to_string(),
+                ipv4: Some("10.240.128.128".to_string()),
+                rx_bytes: 999_999,
+                tx_bytes: 999_999,
+            },
+            NetCandidate {
+                name: "Ethernet".to_string(),
+                ipv4: Some("192.168.15.5".to_string()),
+                rx_bytes: 50_000,
+                tx_bytes: 10_000,
+            },
+            NetCandidate {
+                name: "Loopback Pseudo-Interface 1".to_string(),
+                ipv4: Some("127.0.0.1".to_string()),
+                rx_bytes: 1_000_000,
+                tx_bytes: 1_000_000,
+            },
+        ];
+        let (name, ip, rx, tx) = select_primary_network(&candidates);
+        assert_eq!(name, "Ethernet");
+        assert_eq!(ip, "192.168.15.5");
+        assert_eq!(rx, 50_000);
+        assert_eq!(tx, 10_000);
     }
 }

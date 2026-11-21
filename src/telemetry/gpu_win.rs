@@ -404,7 +404,7 @@ impl Drop for PdhGpuQuery {
     }
 }
 
-unsafe fn read_pdh_double_array(hcounter: PDH_HCOUNTER) -> Option<Vec<(String, f64)>> {
+pub(super) unsafe fn read_pdh_double_array(hcounter: PDH_HCOUNTER) -> Option<Vec<(String, f64)>> {
     unsafe {
         let mut buf_size = 0u32;
         let mut item_count = 0u32;
