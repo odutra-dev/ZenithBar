@@ -39,21 +39,36 @@ pub struct WindowsGpuMonitor {
     nvml_checked: bool,
     adl: Option<AdlApi>,
     adl_checked: bool,
+    logged_dxgi: bool,
+    logged_adl_sample: bool,
 }
 
 impl WindowsGpuMonitor {
     pub fn new() -> Self {
+        let pdh = PdhGpuQuery::new();
+        if pdh.is_none() {
+            crate::log_msg("[GPU Win] Aviso: falha ao inicializar contadores PDH.");
+        }
         Self {
-            pdh: PdhGpuQuery::new(),
+            pdh,
             nvml: None,
             nvml_checked: false,
             adl: None,
             adl_checked: false,
+            logged_dxgi: false,
+            logged_adl_sample: false,
         }
     }
 
     pub fn sample(&mut self) -> Option<WinGpuSample> {
         let adapter = query_dxgi_primary_adapter()?;
+        if !self.logged_dxgi {
+            self.logged_dxgi = true;
+            crate::log_msg(&format!(
+                "[GPU Win] DXGI selecionou '{}' (VendorID=0x{:04X}, VRAM={:.2} GB)",
+                adapter.name, adapter.vendor_id, adapter.vram_total_gb
+            ));
+        }
 
         let mut usage: Option<f32> = None;
         let mut clock_ghz: Option<f32> = None;
@@ -83,6 +98,10 @@ impl WindowsGpuMonitor {
             if !self.nvml_checked {
                 self.nvml_checked = true;
                 self.nvml = NvmlApi::load();
+                crate::log_msg(&format!(
+                    "[GPU Win] NVML (nvml.dll): {}",
+                    if self.nvml.is_some() { "carregada" } else { "indisponível" }
+                ));
             }
             if let Some(nvml) = self.nvml.as_ref() {
                 if let Some(nv) = nvml.sample(&adapter.name) {
@@ -109,21 +128,28 @@ impl WindowsGpuMonitor {
             if !self.adl_checked {
                 self.adl_checked = true;
                 self.adl = AdlApi::load();
+                crate::log_msg(&format!(
+                    "[GPU Win] AMD ADL (atiadlxx.dll): {}",
+                    if self.adl.is_some() { "carregada" } else { "indisponível" }
+                ));
             }
             if let Some(adl) = self.adl.as_ref() {
-                if let Some(amd) = adl.sample(&adapter.name) {
-                    if amd.usage.is_some() {
-                        usage = amd.usage;
-                    }
-                    if amd.clock_ghz.is_some() {
-                        clock_ghz = amd.clock_ghz;
-                    }
-                    if amd.temperature_c.is_some() {
-                        temperature_c = amd.temperature_c;
-                    }
-                    if amd.fan_percent.is_some() {
-                        fan_percent = amd.fan_percent;
-                    }
+                let amd = adl.sample(&adapter.name);
+                if !self.logged_adl_sample {
+                    self.logged_adl_sample = true;
+                    crate::log_msg(&format!("[GPU Win] ADL amostra inicial: {}", amd.diag));
+                }
+                if amd.usage.is_some() {
+                    usage = amd.usage;
+                }
+                if amd.clock_ghz.is_some() {
+                    clock_ghz = amd.clock_ghz;
+                }
+                if amd.temperature_c.is_some() {
+                    temperature_c = amd.temperature_c;
+                }
+                if amd.fan_percent.is_some() {
+                    fan_percent = amd.fan_percent;
                 }
             }
         }
@@ -701,6 +727,55 @@ struct AdlFanSpeedValue {
 }
 
 #[repr(C)]
+#[derive(Default)]
+struct AdlOdNPerformanceStatus {
+    core_clock: c_int, // 10 kHz units
+    memory_clock: c_int,
+    dcef_clock: c_int,
+    gfx_clock: c_int,
+    uvd_clock: c_int,
+    vce_clock: c_int,
+    gpu_activity_percent: c_int,
+    current_core_perf_level: c_int,
+    current_mem_perf_level: c_int,
+    current_dcef_perf_level: c_int,
+    current_gfx_perf_level: c_int,
+    uvd_perf_level: c_int,
+    vce_perf_level: c_int,
+    current_bus_speed: c_int,
+    current_bus_lanes: c_int,
+    max_bus_lanes: c_int,
+    vddc: c_int,
+    vddci: c_int,
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct AdlOdNFanControl {
+    mode: c_int,
+    fan_control_mode: c_int,
+    current_fan_speed_mode: c_int, // 1 = percent, 2 = RPM
+    current_fan_speed: c_int,
+    target_fan_speed: c_int,
+    target_temp: c_int,
+    min_performance_clock: c_int,
+    min_fan_limit: c_int,
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct AdlOd6CurrentStatus {
+    engine_clock: c_int, // 10 kHz units
+    memory_clock: c_int,
+    activity_percent: c_int,
+    current_perf_level: c_int,
+    current_bus_speed: c_int,
+    current_bus_lanes: c_int,
+    max_bus_lanes: c_int,
+    reserved: c_int,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy, Default)]
 struct AdlSingleSensorData {
     supported: c_int,
@@ -724,6 +799,7 @@ struct AdlSample {
     clock_ghz: Option<f32>,
     temperature_c: Option<f32>,
     fan_percent: Option<f32>,
+    diag: String,
 }
 
 type AdlMallocFn = unsafe extern "C" fn(c_int) -> *mut c_void;
@@ -745,6 +821,10 @@ struct AdlApi {
     destroy: unsafe extern "C" fn(*mut c_void) -> c_int,
     num_adapters: unsafe extern "C" fn(*mut c_void, *mut c_int) -> c_int,
     adapter_info: unsafe extern "C" fn(*mut c_void, *mut AdlAdapterInfo, c_int) -> c_int,
+    odn_temp: Option<unsafe extern "C" fn(*mut c_void, c_int, c_int, *mut c_int) -> c_int>,
+    odn_perf: Option<unsafe extern "C" fn(*mut c_void, c_int, *mut AdlOdNPerformanceStatus) -> c_int>,
+    odn_fan: Option<unsafe extern "C" fn(*mut c_void, c_int, *mut AdlOdNFanControl) -> c_int>,
+    od6_status: Option<unsafe extern "C" fn(*mut c_void, c_int, *mut AdlOd6CurrentStatus) -> c_int>,
     od5_temp: Option<unsafe extern "C" fn(*mut c_void, c_int, c_int, *mut AdlTemperature) -> c_int>,
     od5_activity: Option<unsafe extern "C" fn(*mut c_void, c_int, *mut AdlPmActivity) -> c_int>,
     od5_fan: Option<unsafe extern "C" fn(*mut c_void, c_int, c_int, *mut AdlFanSpeedValue) -> c_int>,
@@ -754,7 +834,10 @@ struct AdlApi {
 impl AdlApi {
     fn load() -> Option<Self> {
         unsafe {
-            let module = load_library_candidates(&[w!("atiadlxx.dll")])?;
+            let module = load_library_candidates(&[
+                w!("atiadlxx.dll"),
+                w!("C:\\Windows\\System32\\atiadlxx.dll"),
+            ])?;
 
             let Some(create): Option<
                 unsafe extern "C" fn(AdlMallocFn, c_int, *mut *mut c_void) -> c_int,
@@ -780,11 +863,20 @@ impl AdlApi {
             };
 
             let mut context: *mut c_void = std::ptr::null_mut();
-            if create(adl_malloc, 1, &mut context) != 0 || context.is_null() {
+            let mut rc = create(adl_malloc, 0, &mut context);
+            if rc != 0 || context.is_null() {
+                rc = create(adl_malloc, 1, &mut context);
+            }
+            if rc != 0 || context.is_null() {
+                crate::log_msg(&format!("[GPU Win] ADL2_Main_Control_Create falhou: rc={}", rc));
                 let _ = FreeLibrary(module);
                 return None;
             }
 
+            let odn_temp = resolve_sym(module, b"ADL2_OverdriveN_Temperature_Get\0");
+            let odn_perf = resolve_sym(module, b"ADL2_OverdriveN_PerformanceStatus_Get\0");
+            let odn_fan = resolve_sym(module, b"ADL2_OverdriveN_FanControl_Get\0");
+            let od6_status = resolve_sym(module, b"ADL2_Overdrive6_CurrentStatus_Get\0");
             let od5_temp = resolve_sym(module, b"ADL2_Overdrive5_Temperature_Get\0");
             let od5_activity = resolve_sym(module, b"ADL2_Overdrive5_CurrentActivity_Get\0");
             let od5_fan = resolve_sym(module, b"ADL2_Overdrive5_FanSpeed_Get\0");
@@ -796,6 +888,10 @@ impl AdlApi {
                 destroy,
                 num_adapters,
                 adapter_info,
+                odn_temp,
+                odn_perf,
+                odn_fan,
+                od6_status,
                 od5_temp,
                 od5_activity,
                 od5_fan,
@@ -804,123 +900,240 @@ impl AdlApi {
         }
     }
 
-    fn sample(&self, expected_name: &str) -> Option<AdlSample> {
+    fn sample(&self, expected_name: &str) -> AdlSample {
         unsafe {
             let mut count: c_int = 0;
-            if (self.num_adapters)(self.context, &mut count) != 0 || count <= 0 {
-                return None;
+            let num_rc = (self.num_adapters)(self.context, &mut count);
+            if num_rc != 0 || count <= 0 {
+                return AdlSample {
+                    usage: None,
+                    clock_ghz: None,
+                    temperature_c: None,
+                    fan_percent: None,
+                    diag: format!("num_adapters rc={} count={}", num_rc, count),
+                };
             }
 
             let mut infos = vec![AdlAdapterInfo::default(); count as usize];
             let buf_size = (infos.len() * size_of::<AdlAdapterInfo>()) as c_int;
-            if (self.adapter_info)(self.context, infos.as_mut_ptr(), buf_size) != 0 {
-                return None;
+            let info_rc = (self.adapter_info)(self.context, infos.as_mut_ptr(), buf_size);
+            if info_rc != 0 {
+                return AdlSample {
+                    usage: None,
+                    clock_ghz: None,
+                    temperature_c: None,
+                    fan_percent: None,
+                    diag: format!("adapter_info rc={}", info_rc),
+                };
             }
 
             let expected_lower = expected_name.to_ascii_lowercase();
-            let mut chosen_idx: Option<c_int> = None;
+            let mut candidates: Vec<(u8, c_int)> = Vec::new();
             for info in &infos {
-                if info.vendor_id != 0x1002 {
-                    continue;
-                }
-                if chosen_idx.is_none() {
-                    chosen_idx = Some(info.adapter_index);
-                }
                 let adl_name = CStr::from_ptr(info.adapter_name.as_ptr())
                     .to_string_lossy()
                     .to_ascii_lowercase();
-                if expected_lower.contains(&adl_name) || adl_name.contains(&expected_lower) {
-                    chosen_idx = Some(info.adapter_index);
-                    break;
+                let is_amd_vendor = info.vendor_id == 1002
+                    || info.vendor_id == 0x1002
+                    || adl_name.contains("amd")
+                    || adl_name.contains("radeon");
+                if !is_amd_vendor {
+                    continue;
+                }
+                let name_match = !adl_name.is_empty()
+                    && (expected_lower.contains(&adl_name) || adl_name.contains(&expected_lower));
+                let priority = (if name_match { 0 } else { 4 })
+                    + (if info.present != 0 { 0 } else { 2 })
+                    + (if info.exist != 0 { 0 } else { 1 });
+                if !candidates.iter().any(|(_, idx)| *idx == info.adapter_index) {
+                    candidates.push((priority, info.adapter_index));
                 }
             }
+            candidates.sort_by_key(|(prio, _)| *prio);
 
-            let adapter_index = chosen_idx?;
+            if candidates.is_empty() {
+                return AdlSample {
+                    usage: None,
+                    clock_ghz: None,
+                    temperature_c: None,
+                    fan_percent: None,
+                    diag: format!("nenhum adapter AMD entre {} entradas", infos.len()),
+                };
+            }
+
             let mut usage: Option<f32> = None;
             let mut clock_ghz: Option<f32> = None;
             let mut temperature_c: Option<f32> = None;
             let mut fan_percent: Option<f32> = None;
+            let mut diag_parts: Vec<String> = Vec::new();
 
-            if let Some(query_pm) = self.pm_log_data {
-                let mut pm = AdlPmLogDataOutput {
-                    size: size_of::<AdlPmLogDataOutput>() as c_int,
-                    ..Default::default()
-                };
-                if query_pm(self.context, adapter_index, &mut pm) == 0 {
-                    // ADL_PMLOG_CLK_GFXCLK = 1 (MHz)
-                    let gfx_clk = pm.sensors[1];
-                    if gfx_clk.supported != 0 && gfx_clk.value > 0 && gfx_clk.value < 6000 {
-                        clock_ghz = Some(gfx_clk.value as f32 / 1000.0);
-                    }
-                    // ADL_PMLOG_TEMPERATURE_EDGE = 5 (°C)
-                    let temp_edge = pm.sensors[5];
-                    if temp_edge.supported != 0 && temp_edge.value > 0 && temp_edge.value < 130 {
-                        temperature_c = Some(temp_edge.value as f32);
-                    }
-                    // ADL_PMLOG_FAN_PERCENTAGE = 14 (%)
-                    let fan = pm.sensors[14];
-                    if fan.supported != 0 && (0..=100).contains(&fan.value) {
-                        fan_percent = Some(fan.value as f32 / 100.0);
-                    }
-                    // ADL_PMLOG_INFO_ACTIVITY_GFX = 22 (%)
-                    let act = pm.sensors[22];
-                    if act.supported != 0 && (0..=100).contains(&act.value) {
-                        usage = Some(act.value as f32 / 100.0);
-                    }
-                }
-            }
+            for (_, adapter_index) in &candidates {
+                let idx = *adapter_index;
 
-            if temperature_c.is_none() {
-                if let Some(get_temp) = self.od5_temp {
-                    let mut t = AdlTemperature {
-                        size: size_of::<AdlTemperature>() as c_int,
-                        temperature: 0,
-                    };
-                    if get_temp(self.context, adapter_index, 0, &mut t) == 0 && t.temperature > 0 {
-                        temperature_c = Some(t.temperature as f32 / 1000.0);
-                    }
-                }
-            }
-
-            if usage.is_none() || clock_ghz.is_none() {
-                if let Some(get_act) = self.od5_activity {
-                    let mut act = AdlPmActivity {
-                        size: size_of::<AdlPmActivity>() as c_int,
+                // 1. PMLog (RDNA1/RDNA2/RDNA3): indices from official ADL_PMLOG_SENSORS enum
+                if let Some(query_pm) = self.pm_log_data {
+                    let mut pm = AdlPmLogDataOutput {
+                        size: size_of::<AdlPmLogDataOutput>() as c_int,
                         ..Default::default()
                     };
-                    if get_act(self.context, adapter_index, &mut act) == 0 {
-                        if usage.is_none() && (0..=100).contains(&act.activity_percent) {
-                            usage = Some(act.activity_percent as f32 / 100.0);
+                    let rc = query_pm(self.context, idx, &mut pm);
+                    diag_parts.push(format!("idx{}:pmlog={}", idx, rc));
+                    if rc == 0 {
+                        // ADL_PMLOG_CLK_GFXCLK = 1 (MHz)
+                        let gfx_clk = pm.sensors[1];
+                        if gfx_clk.supported != 0 && gfx_clk.value > 0 && gfx_clk.value < 6000 {
+                            clock_ghz = Some(gfx_clk.value as f32 / 1000.0);
                         }
-                        if clock_ghz.is_none() && act.engine_clock > 0 {
-                            clock_ghz = Some(act.engine_clock as f32 / 100_000.0);
+                        // ADL_PMLOG_TEMPERATURE_EDGE = 8 (°C), HOTSPOT = 27 (°C)
+                        let temp_edge = pm.sensors[8];
+                        let temp_hot = pm.sensors[27];
+                        if temp_edge.supported != 0 && temp_edge.value > 0 && temp_edge.value < 130 {
+                            temperature_c = Some(temp_edge.value as f32);
+                        } else if temp_hot.supported != 0 && temp_hot.value > 0 && temp_hot.value < 130 {
+                            temperature_c = Some(temp_hot.value as f32);
+                        }
+                        // ADL_PMLOG_FAN_PERCENTAGE = 15 (%)
+                        let fan = pm.sensors[15];
+                        if fan.supported != 0 && (0..=100).contains(&fan.value) {
+                            fan_percent = Some(fan.value as f32 / 100.0);
+                        }
+                        // ADL_PMLOG_INFO_ACTIVITY_GFX = 19 (%)
+                        let act = pm.sensors[19];
+                        if act.supported != 0 && (0..=100).contains(&act.value) {
+                            usage = Some(act.value as f32 / 100.0);
                         }
                     }
                 }
-            }
 
-            if fan_percent.is_none() {
-                if let Some(get_fan) = self.od5_fan {
-                    let mut fan = AdlFanSpeedValue {
-                        size: size_of::<AdlFanSpeedValue>() as c_int,
-                        speed_type: 1,
-                        fan_speed: 0,
-                        flags: 0,
-                    };
-                    if get_fan(self.context, adapter_index, 0, &mut fan) == 0
-                        && (0..=100).contains(&fan.fan_speed)
-                    {
-                        fan_percent = Some(fan.fan_speed as f32 / 100.0);
+                // 2. OverdriveN (Polaris/Vega/RDNA1/RDNA2)
+                if temperature_c.is_none() {
+                    if let Some(get_temp) = self.odn_temp {
+                        for temp_type in [1, 7] {
+                            let mut t_mc: c_int = 0;
+                            let rc = get_temp(self.context, idx, temp_type, &mut t_mc);
+                            if rc == 0 && t_mc > 0 && t_mc < 150_000 {
+                                temperature_c = Some(t_mc as f32 / 1000.0);
+                                break;
+                            }
+                            if temp_type == 1 {
+                                diag_parts.push(format!("idx{}:odn_temp={}", idx, rc));
+                            }
+                        }
                     }
+                }
+
+                if clock_ghz.is_none() || usage.is_none() {
+                    if let Some(get_perf) = self.odn_perf {
+                        let mut perf = AdlOdNPerformanceStatus::default();
+                        let rc = get_perf(self.context, idx, &mut perf);
+                        if rc == 0 {
+                            if clock_ghz.is_none() && perf.core_clock > 0 {
+                                clock_ghz = Some(perf.core_clock as f32 / 100_000.0);
+                            }
+                            if usage.is_none() && (0..=100).contains(&perf.gpu_activity_percent) {
+                                usage = Some(perf.gpu_activity_percent as f32 / 100.0);
+                            }
+                        } else {
+                            diag_parts.push(format!("idx{}:odn_perf={}", idx, rc));
+                        }
+                    }
+                }
+
+                if fan_percent.is_none() {
+                    if let Some(get_fan) = self.odn_fan {
+                        let mut fan = AdlOdNFanControl::default();
+                        let rc = get_fan(self.context, idx, &mut fan);
+                        if rc == 0
+                            && fan.current_fan_speed_mode == 1
+                            && (0..=100).contains(&fan.current_fan_speed)
+                        {
+                            fan_percent = Some(fan.current_fan_speed as f32 / 100.0);
+                        } else if rc != 0 {
+                            diag_parts.push(format!("idx{}:odn_fan={}", idx, rc));
+                        }
+                    }
+                }
+
+                // 3. Overdrive6 fallback
+                if clock_ghz.is_none() || usage.is_none() {
+                    if let Some(get_od6) = self.od6_status {
+                        let mut st = AdlOd6CurrentStatus::default();
+                        if get_od6(self.context, idx, &mut st) == 0 {
+                            if clock_ghz.is_none() && st.engine_clock > 0 {
+                                clock_ghz = Some(st.engine_clock as f32 / 100_000.0);
+                            }
+                            if usage.is_none() && (0..=100).contains(&st.activity_percent) {
+                                usage = Some(st.activity_percent as f32 / 100.0);
+                            }
+                        }
+                    }
+                }
+
+                // 4. Overdrive5 legacy fallback
+                if temperature_c.is_none() {
+                    if let Some(get_temp) = self.od5_temp {
+                        let mut t = AdlTemperature {
+                            size: size_of::<AdlTemperature>() as c_int,
+                            temperature: 0,
+                        };
+                        if get_temp(self.context, idx, 0, &mut t) == 0 && t.temperature > 0 {
+                            temperature_c = Some(t.temperature as f32 / 1000.0);
+                        }
+                    }
+                }
+
+                if usage.is_none() || clock_ghz.is_none() {
+                    if let Some(get_act) = self.od5_activity {
+                        let mut act = AdlPmActivity {
+                            size: size_of::<AdlPmActivity>() as c_int,
+                            ..Default::default()
+                        };
+                        if get_act(self.context, idx, &mut act) == 0 {
+                            if usage.is_none() && (0..=100).contains(&act.activity_percent) {
+                                usage = Some(act.activity_percent as f32 / 100.0);
+                            }
+                            if clock_ghz.is_none() && act.engine_clock > 0 {
+                                clock_ghz = Some(act.engine_clock as f32 / 100_000.0);
+                            }
+                        }
+                    }
+                }
+
+                if fan_percent.is_none() {
+                    if let Some(get_fan) = self.od5_fan {
+                        let mut fan = AdlFanSpeedValue {
+                            size: size_of::<AdlFanSpeedValue>() as c_int,
+                            speed_type: 1,
+                            fan_speed: 0,
+                            flags: 0,
+                        };
+                        if get_fan(self.context, idx, 0, &mut fan) == 0
+                            && (0..=100).contains(&fan.fan_speed)
+                        {
+                            fan_percent = Some(fan.fan_speed as f32 / 100.0);
+                        }
+                    }
+                }
+
+                if temperature_c.is_some() || clock_ghz.is_some() || fan_percent.is_some() {
+                    break;
                 }
             }
 
-            Some(AdlSample {
+            AdlSample {
                 usage,
                 clock_ghz,
                 temperature_c,
                 fan_percent,
-            })
+                diag: format!(
+                    "candidates={:?} temp={:?} clk={:?} fan={:?} [{}]",
+                    candidates,
+                    temperature_c,
+                    clock_ghz,
+                    fan_percent,
+                    diag_parts.join(", ")
+                ),
+            }
         }
     }
 }
