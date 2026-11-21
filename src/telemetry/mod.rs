@@ -508,7 +508,7 @@ fn parse_optional_f32(s: &str) -> Option<f32> {
     trimmed.parse::<f32>().ok()
 }
 
-fn nvidia_smi_executable() -> &'static str {
+fn nvidia_smi_executable() -> String {
     #[cfg(target_os = "windows")]
     {
         for candidate in [
@@ -516,11 +516,14 @@ fn nvidia_smi_executable() -> &'static str {
             "C:\\Program Files\\NVIDIA Corporation\\NVSMI\\nvidia-smi.exe",
         ] {
             if std::path::Path::new(candidate).is_file() {
-                return candidate;
+                return candidate.to_string();
             }
         }
+        if let Some(found) = gpu_win::find_nvidia_driverstore_file("nvidia-smi.exe") {
+            return found;
+        }
     }
-    "nvidia-smi"
+    "nvidia-smi".to_string()
 }
 
 fn query_nvidia_smi(available_cache: &mut Option<bool>) -> Option<RawGpuTelemetry> {
