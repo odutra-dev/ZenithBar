@@ -1279,4 +1279,39 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn rotate_log_file_keeps_small_or_missing_logs_intact() {
+        let dir = std::env::temp_dir().join(format!("zenithbar_log_small_test_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let log_path = dir.join("zenithbar.log");
+        let backup_path = dir.join("zenithbar.log.old");
+
+        // Missing file is a no-op
+        rotate_log_file(&log_path, 1024);
+        assert!(!backup_path.exists());
+
+        // File below threshold is preserved
+        std::fs::write(&log_path, vec![b'a'; 512]).unwrap();
+        rotate_log_file(&log_path, 1024);
+        assert!(log_path.exists());
+        assert!(!backup_path.exists());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn resolve_display_name_prefers_trimmed_custom_or_detected() {
+        assert_eq!(resolve_display_name("", "Ryzen 7 5700G"), "Ryzen 7 5700G");
+        assert_eq!(resolve_display_name("   ", "RX 6750 XT"), "RX 6750 XT");
+        assert_eq!(resolve_display_name("  My CPU  ", "Ryzen 7 5700G"), "My CPU");
+    }
+
+    #[test]
+    fn format_temp_c_formats_some_and_none() {
+        assert_eq!(format_temp_c(None), (0.0, "--°C".to_string()));
+        let (val, text) = format_temp_c(Some(64.6));
+        assert!((val - 64.6).abs() < 0.001);
+        assert_eq!(text, "65°C");
+    }
 }

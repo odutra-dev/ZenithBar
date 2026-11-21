@@ -341,3 +341,28 @@ pub fn run_manual_update_check(culture: &str) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_version_handles_prefix_prerelease_and_partial_strings() {
+        assert_eq!(parse_version("0.6.2"), (0, 6, 2));
+        assert_eq!(parse_version("v0.6.2"), (0, 6, 2));
+        assert_eq!(parse_version("V1.2.3-rc.1"), (1, 2, 3));
+        assert_eq!(parse_version("2.10"), (2, 10, 0));
+        assert_eq!(parse_version("invalid"), (0, 0, 0));
+    }
+
+    #[test]
+    fn is_newer_version_compares_numeric_semver_components() {
+        assert!(is_newer_version("v0.10.0", "0.6.2"));
+        assert!(is_newer_version("v0.6.3", "0.6.2"));
+        assert!(is_newer_version("1.0.0", "0.99.99"));
+
+        assert!(!is_newer_version("v0.6.2", "0.6.2"));
+        assert!(!is_newer_version("0.6.1", "0.6.2"));
+        assert!(!is_newer_version("0.6.2-beta", "0.6.2"));
+    }
+}
