@@ -7,6 +7,8 @@ mod disk_win;
 #[cfg(target_os = "windows")]
 mod gpu_win;
 #[cfg(target_os = "windows")]
+mod shm_win;
+#[cfg(target_os = "windows")]
 mod wmi_win;
 
 const HISTORY_SIZE: usize = 12;
@@ -101,6 +103,8 @@ pub struct TelemetryEngine {
     #[cfg(target_os = "windows")]
     win_gpu: gpu_win::WindowsGpuMonitor,
     #[cfg(target_os = "windows")]
+    win_shm: shm_win::WindowsShmMonitor,
+    #[cfg(target_os = "windows")]
     win_wmi: wmi_win::WindowsWmiMonitor,
 }
 
@@ -164,6 +168,8 @@ impl TelemetryEngine {
             #[cfg(target_os = "windows")]
             win_gpu: gpu_win::WindowsGpuMonitor::new(),
             #[cfg(target_os = "windows")]
+            win_shm: shm_win::WindowsShmMonitor::new(),
+            #[cfg(target_os = "windows")]
             win_wmi: wmi_win::WindowsWmiMonitor::new(),
         }
     }
@@ -187,6 +193,7 @@ impl TelemetryEngine {
         {
             self.win_disk = disk_win::WindowsDiskIoMonitor::new();
             self.win_gpu = gpu_win::WindowsGpuMonitor::new();
+            self.win_shm = shm_win::WindowsShmMonitor::new();
             self.win_wmi = wmi_win::WindowsWmiMonitor::new();
         }
     }
@@ -210,6 +217,35 @@ impl TelemetryEngine {
 
         #[cfg(target_os = "windows")]
         {
+            let need_cpu_temp = cpu.temperature_c.is_none();
+            let need_gpu = gpu.temperature_c.is_none()
+                || gpu.clock_ghz.is_none()
+                || gpu.usage.is_none()
+                || gpu.fan_percent.is_none();
+            if need_cpu_temp || need_gpu {
+                let shm = self.win_shm.sample(need_cpu_temp, need_gpu);
+                if cpu.temperature_c.is_none() {
+                    cpu.temperature_c = shm.cpu_temp_c;
+                }
+                if gpu.temperature_c.is_none() {
+                    gpu.temperature_c = shm.gpu_temp_c;
+                }
+                if gpu.clock_ghz.is_none() {
+                    gpu.clock_ghz = shm.gpu_clock_ghz;
+                }
+                if gpu.usage.is_none() {
+                    gpu.usage = shm.gpu_usage;
+                    if let Some(u) = gpu.usage {
+                        if let Some(last) = gpu.history.last_mut() {
+                            *last = u.clamp(0.0, 1.0);
+                        }
+                    }
+                }
+                if gpu.fan_percent.is_none() {
+                    gpu.fan_percent = shm.gpu_fan_percent;
+                }
+            }
+
             let need_cpu_temp = cpu.temperature_c.is_none();
             let need_gpu = gpu.temperature_c.is_none()
                 || gpu.clock_ghz.is_none()
