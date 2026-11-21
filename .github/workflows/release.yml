@@ -209,6 +209,10 @@ jobs:
       - name: Cache Cargo Dependencies
         uses: Swatinem/rust-cache@v2
 
+      - name: Run Windows Tests
+        run: |
+          cargo test --locked
+
       - name: Build Windows Binary
         run: |
           cargo build --release
@@ -253,6 +257,10 @@ jobs:
 
       - name: Cache Cargo Dependencies
         uses: Swatinem/rust-cache@v2
+
+      - name: Run Linux Tests
+        run: |
+          cargo test --locked
 
       - name: Build Linux Binary
         run: |
