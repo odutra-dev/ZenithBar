@@ -40,6 +40,9 @@ pub struct WindowsWmiMonitor {
     locator: Option<IWbemLocator>,
     lhm_services: Option<IWbemServices>,
     lhm_checked: bool,
+    cim_services: Option<IWbemServices>,
+    cim_checked: bool,
+    cim_disabled: bool,
     acpi_services: Option<IWbemServices>,
     acpi_checked: bool,
     acpi_disabled: bool,
@@ -63,6 +66,9 @@ impl WindowsWmiMonitor {
                 locator,
                 lhm_services: None,
                 lhm_checked: false,
+                cim_services: None,
+                cim_checked: false,
+                cim_disabled: false,
                 acpi_services: None,
                 acpi_checked: false,
                 acpi_disabled: false,
@@ -88,6 +94,32 @@ impl WindowsWmiMonitor {
 
         if let Some(svc) = self.lhm_services.as_ref() {
             query_lhm_sensors(svc, &mut out);
+        }
+
+        if need_cpu_temp && out.cpu_temp_c.is_none() && !self.cim_disabled {
+            if !self.cim_checked {
+                self.cim_checked = true;
+                self.cim_services = self.connect_namespace("root\\CIMV2");
+                if self.cim_services.is_none() {
+                    self.cim_disabled = true;
+                }
+            }
+            if let Some(svc) = self.cim_services.as_ref() {
+                match query_cimv2_thermal_zone(svc) {
+                    Ok(Some(temp)) => out.cpu_temp_c = Some(temp),
+                    Ok(None) => {
+                        self.cim_disabled = true;
+                        crate::log_msg("[WMI Win] Win32_PerfFormattedData_Counters_ThermalZoneInformation sem sensores térmicos válidos.");
+                    }
+                    Err(err_hr) => {
+                        self.cim_disabled = true;
+                        crate::log_msg(&format!(
+                            "[WMI Win] Win32_PerfFormattedData_Counters_ThermalZoneInformation indisponível (hr=0x{:08X}).",
+                            err_hr as u32
+                        ));
+                    }
+                }
+            }
         }
 
         if need_cpu_temp && out.cpu_temp_c.is_none() && !self.acpi_disabled {
@@ -141,6 +173,7 @@ impl WindowsWmiMonitor {
 impl Drop for WindowsWmiMonitor {
     fn drop(&mut self) {
         self.lhm_services = None;
+        self.cim_services = None;
         self.acpi_services = None;
         self.locator = None;
         if self.com_owned {
@@ -250,6 +283,62 @@ fn query_lhm_sensors(svc: &IWbemServices, out: &mut WmiSensorSample) {
                 break;
             }
         }
+    }
+}
+
+fn query_cimv2_thermal_zone(svc: &IWbemServices) -> Result<Option<f32>, i32> {
+    unsafe {
+        let wql = BSTR::from("WQL");
+        let query = BSTR::from(
+            "SELECT HighPrecisionTemperature, Temperature FROM Win32_PerfFormattedData_Counters_ThermalZoneInformation",
+        );
+        let flags = WBEM_FLAG_FORWARD_ONLY | WBEM_FLAG_RETURN_IMMEDIATELY;
+        let enumerator = svc.ExecQuery(&wql, &query, flags, None).map_err(|e| e.code().0)?;
+
+        let mut max_temp: Option<f32> = None;
+        loop {
+            let mut objs = [None];
+            let mut returned = 0u32;
+            let hr = enumerator.Next(WBEM_INFINITE, &mut objs, &mut returned);
+            if hr.is_err() && returned == 0 {
+                return Err(hr.0);
+            }
+            if returned == 0 {
+                break;
+            }
+            if let Some(obj) = objs[0].as_ref() {
+                let hp = get_prop_f32(obj, w!("HighPrecisionTemperature"));
+                let raw = get_prop_f32(obj, w!("Temperature"));
+                let celsius = hp
+                    .and_then(|v| {
+                        if v > 2000.0 {
+                            Some((v / 10.0) - 273.15)
+                        } else if v > 200.0 && v < 450.0 {
+                            Some(v - 273.15)
+                        } else {
+                            None
+                        }
+                    })
+                    .or_else(|| {
+                        raw.and_then(|v| {
+                            if v > 200.0 && v < 450.0 {
+                                Some(v - 273.15)
+                            } else {
+                                None
+                            }
+                        })
+                    });
+                if let Some(c) = celsius {
+                    if c > 5.0 && c < 130.0 {
+                        max_temp = Some(max_temp.map_or(c, |m| m.max(c)));
+                    }
+                }
+            }
+            if hr.is_err() {
+                break;
+            }
+        }
+        Ok(max_temp)
     }
 }
 

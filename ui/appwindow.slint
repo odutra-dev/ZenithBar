@@ -62,14 +62,17 @@ component EditableLabel inherits Rectangle {
     in property <int> font_weight: 400;
     in property <color> text_color: #94a3b8;
     in property <color> accent_color: #38bdf8;
+    in property <color> idle_bg: transparent;
     in property <bool> align_right: false;
     callback committed(string);
 
     private property <bool> editing: false;
     private property <string> draft_text: "";
+    min-width: 0px;
     vertical-stretch: 0;
+    height: root.editing ? max(22px, edit_row.preferred-height) : max(18px, display_row.preferred-height);
     border-radius: 4px;
-    background: root.editing ? #0f172a : (ta.has-hover ? #ffffff0a : transparent);
+    background: root.editing ? #0f172a : (ta.has-hover ? #ffffff12 : root.idle_bg);
     border-width: root.editing ? 1px : 0px;
     border-color: root.editing ? root.accent_color : transparent;
 
@@ -79,105 +82,111 @@ component EditableLabel inherits Rectangle {
         clicked => {
             root.draft_text = root.text;
             root.editing = true;
+            edit_input.focus();
         }
     }
 
-    VerticalLayout {
-        if !root.editing : HorizontalLayout {
-            padding-left: 2px;
-            padding-right: 2px;
-            padding-top: 1px;
-            padding-bottom: 1px;
-            spacing: 4px;
+    display_row := HorizontalLayout {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        visible: !root.editing;
+        padding-left: 5px;
+        padding-right: 5px;
+        padding-top: 3px;
+        padding-bottom: 3px;
+        spacing: 4px;
 
-            Text {
-                text: root.text;
-                font-size: root.font_size;
-                font-weight: root.font_weight;
-                color: ta.has-hover ? #f1f5f9 : root.text_color;
-                horizontal-alignment: root.align_right ? right : left;
-                wrap: word-wrap;
-                horizontal-stretch: 1;
-                vertical-alignment: center;
+        Text {
+            text: root.text;
+            font-size: root.font_size;
+            font-weight: root.font_weight;
+            color: ta.has-hover ? #f8fafc : root.text_color;
+            horizontal-alignment: root.align_right ? right : left;
+            wrap: word-wrap;
+            min-width: 0px;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+        }
+
+        if ta.has-hover : Text {
+            text: "✎";
+            font-size: 9px;
+            color: root.accent_color;
+            vertical-alignment: center;
+        }
+    }
+
+    edit_row := HorizontalLayout {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        visible: root.editing;
+        padding-left: 4px;
+        padding-right: 4px;
+        padding-top: 2px;
+        padding-bottom: 2px;
+        spacing: 4px;
+
+        edit_input := TextInput {
+            text <=> root.draft_text;
+            font-size: root.font_size;
+            font-weight: root.font_weight;
+            color: #f8fafc;
+            single-line: true;
+            min-width: 0px;
+            horizontal-stretch: 1;
+            vertical-alignment: center;
+            accepted => {
+                root.editing = false;
+                root.committed(root.draft_text);
             }
-
-            if ta.has-hover : Text {
-                text: "✎";
-                font-size: 9px;
-                color: root.accent_color;
-                vertical-alignment: center;
+            key-pressed(event) => {
+                if (event.text == Key.Escape) {
+                    root.editing = false;
+                    return accept;
+                }
+                return reject;
             }
         }
 
-        if root.editing : HorizontalLayout {
-            padding-left: 4px;
-            padding-right: 4px;
-            padding-top: 2px;
-            padding-bottom: 2px;
-            spacing: 4px;
-
-            edit_input := TextInput {
-                text <=> root.draft_text;
-                font-size: root.font_size;
-                font-weight: root.font_weight;
-                color: #f8fafc;
-                single-line: true;
-                horizontal-stretch: 1;
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            background: ok_ta.has-hover ? #10b98140 : #ffffff12;
+            Text {
+                text: "✓";
+                font-size: 9px;
+                color: #34d399;
+                horizontal-alignment: center;
                 vertical-alignment: center;
-                init => {
-                    self.focus();
-                }
-                accepted => {
+            }
+            ok_ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
                     root.editing = false;
                     root.committed(root.draft_text);
                 }
-                key-pressed(event) => {
-                    if (event.text == Key.Escape) {
-                        root.editing = false;
-                        return accept;
-                    }
-                    return reject;
-                }
             }
+        }
 
-            Rectangle {
-                width: 16px;
-                height: 16px;
-                border-radius: 3px;
-                background: ok_ta.has-hover ? #10b98140 : #ffffff12;
-                Text {
-                    text: "✓";
-                    font-size: 9px;
-                    color: #34d399;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-                ok_ta := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        root.editing = false;
-                        root.committed(root.draft_text);
-                    }
-                }
+        Rectangle {
+            width: 16px;
+            height: 16px;
+            border-radius: 3px;
+            background: cancel_ta.has-hover ? #ef444440 : #ffffff12;
+            Text {
+                text: "✕";
+                font-size: 9px;
+                color: #f87171;
+                horizontal-alignment: center;
+                vertical-alignment: center;
             }
-
-            Rectangle {
-                width: 16px;
-                height: 16px;
-                border-radius: 3px;
-                background: cancel_ta.has-hover ? #ef444440 : #ffffff12;
-                Text {
-                    text: "✕";
-                    font-size: 9px;
-                    color: #f87171;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-                cancel_ta := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        root.editing = false;
-                    }
+            cancel_ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.editing = false;
                 }
             }
         }
@@ -372,15 +381,18 @@ export component AppWindow inherits Window {
 
             HorizontalLayout {
                 padding: 8px;
+                spacing: 6px;
                 alignment: space-between;
 
                 VerticalLayout {
                     alignment: center;
                     spacing: 2px;
+                    min-width: 0px;
                     horizontal-stretch: 1;
 
                     HorizontalLayout {
                         spacing: 6px;
+                        min-width: 0px;
                         Text {
                             text: root.time_str;
                             font-size: root.sidebar_width_px < 220 ? 15px : 18px;
@@ -390,7 +402,7 @@ export component AppWindow inherits Window {
                         }
                         if root.show_machine_name : EditableLabel {
                             text: root.hostname;
-                            font_size: root.sidebar_width_px < 220 ? 9px : 10px;
+                            font_size: root.sidebar_width_px < 220 ? 8.5px : 9.5px;
                             font_weight: 600;
                             text_color: #38bdf8;
                             accent_color: #38bdf8;
@@ -505,8 +517,10 @@ export component AppWindow inherits Window {
                     EditableLabel {
                         text: root.cpu_name;
                         font_size: 10px;
-                        text_color: #94a3b8;
+                        font_weight: 600;
+                        text_color: #cbd5e1;
                         accent_color: #38bdf8;
+                        idle_bg: #ffffff08;
                         align_right: root.text_align_right;
                         committed(val) => { root.request_set_custom_cpu_name(val); }
                     }
@@ -643,8 +657,10 @@ export component AppWindow inherits Window {
                     EditableLabel {
                         text: root.gpu_name;
                         font_size: 10px;
-                        text_color: #94a3b8;
+                        font_weight: 600;
+                        text_color: #cbd5e1;
                         accent_color: #10b981;
+                        idle_bg: #ffffff08;
                         align_right: root.text_align_right;
                         committed(val) => { root.request_set_custom_gpu_name(val); }
                     }
@@ -818,8 +834,10 @@ export component AppWindow inherits Window {
                     EditableLabel {
                         text: root.net_adapter_name;
                         font_size: 10px;
-                        text_color: #94a3b8;
+                        font_weight: 600;
+                        text_color: #cbd5e1;
                         accent_color: #f43f5e;
+                        idle_bg: #ffffff08;
                         align_right: root.text_align_right;
                         committed(val) => { root.request_set_custom_net_name(val); }
                     }
