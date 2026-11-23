@@ -239,6 +239,9 @@ fn apply_locale_to_settings(sw: &SettingsWindow, s: &i18n::I18nStrings) {
     sw.set_i18n_enable_cpu_desc(s.enable_cpu_desc.clone().into());
     sw.set_i18n_show_cores_label(s.show_cores_label.clone().into());
     sw.set_i18n_show_cores_desc(s.show_cores_desc.clone().into());
+    sw.set_i18n_pawnio_label(s.pawnio_label.clone().into());
+    sw.set_i18n_pawnio_desc(s.pawnio_desc.clone().into());
+    sw.set_i18n_btn_setup_pawnio(s.btn_setup_pawnio.clone().into());
     sw.set_i18n_enable_ram_label(s.enable_ram_label.clone().into());
     sw.set_i18n_enable_ram_desc(s.enable_ram_desc.clone().into());
     sw.set_i18n_enable_gpu_label(s.enable_gpu_label.clone().into());
@@ -296,6 +299,7 @@ fn populate_settings_ui(sw: &SettingsWindow, cfg: &AppConfig, monitor_count: usi
 
     sw.set_enable_cpu(cfg.enable_cpu);
     sw.set_show_cpu_cores(cfg.show_cpu_cores);
+    sw.set_show_pawnio_setup(cfg!(target_os = "windows"));
     sw.set_enable_ram(cfg.enable_ram);
     sw.set_enable_gpu(cfg.enable_gpu);
     sw.set_enable_disks(cfg.enable_disks);
@@ -473,6 +477,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }));
 
     rotate_log_file(&resolve_log_path(), MAX_LOG_BYTES);
+
+    #[cfg(target_os = "windows")]
+    {
+        if std::env::args().any(|a| a == "--sensor-service") {
+            std::process::exit(telemetry::pawnio_win::run_sensor_service_entry());
+        }
+        if std::env::args().any(|a| a == "--setup-pawnio") {
+            let cfg = AppConfig::load();
+            std::process::exit(telemetry::pawnio_win::run_setup_pawnio_cli(&cfg.culture));
+        }
+    }
 
     let wait_timeout = if std::env::args().any(|a| a == "--restarted") {
         Duration::from_secs(3)
@@ -833,6 +848,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         });
     });
 
+    let config_pawnio_btn = config.clone();
+    settings_ui.on_request_setup_pawnio(move || {
+        {
+            let mut cfg = config_pawnio_btn.borrow_mut();
+            if cfg.pawnio_prompt_dismissed {
+                cfg.pawnio_prompt_dismissed = false;
+                let _ = cfg.save();
+            }
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let culture = config_pawnio_btn.borrow().culture.clone();
+            std::thread::spawn(move || {
+                if let Err(e) = telemetry::pawnio_win::launch_elevated_pawnio_setup() {
+                    log_msg(&format!("[PawnIO] Falha ao solicitar elevação UAC: {}", e));
+                    let s = i18n::load_locale(&culture);
+                    unsafe {
+                        use windows::core::HSTRING;
+                        use windows::Win32::UI::WindowsAndMessaging::{MessageBoxW, MB_ICONWARNING, MB_OK};
+                        let title = HSTRING::from(s.pawnio_prompt_title);
+                        let body = HSTRING::from(format!("{} {}", s.pawnio_setup_err, e));
+                        let _ = MessageBoxW(None, &body, &title, MB_OK | MB_ICONWARNING);
+                    }
+                }
+            });
+        }
+    });
+
     let appbar_ref = appbar_holder.clone();
     let config_ref = config.clone();
     let tray_ref = tray_holder.clone();
@@ -847,6 +890,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let is_vis_clone = is_visible.clone();
     let appbar_tray = appbar_holder.clone();
     let monitors_tray_list = monitors.clone();
+    let last_cpu_temp: Rc<RefCell<Option<f32>>> = Rc::new(RefCell::new(None));
+    let last_cpu_temp_timer = last_cpu_temp.clone();
+    #[cfg(target_os = "windows")]
+    let pawnio_dismiss_pending = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    #[cfg(target_os = "windows")]
+    let pawnio_dismiss_poll = pawnio_dismiss_pending.clone();
 
     let telemetry_timer = slint::Timer::default();
     telemetry_timer.start(
@@ -943,6 +992,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
 
+            #[cfg(target_os = "windows")]
+            if pawnio_dismiss_poll.swap(false, std::sync::atomic::Ordering::SeqCst)
+                && let Ok(mut cfg) = config_poll.try_borrow_mut()
+                && !cfg.pawnio_prompt_dismissed
+            {
+                cfg.pawnio_prompt_dismissed = true;
+                let _ = cfg.save();
+            }
+
             // Atualiza telemetria
             if let Some(ui) = ui_weak_timer.upgrade() {
                 let now = Local::now();
@@ -964,6 +1022,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         latest_snap = Some(snap);
                     }
                     if let Some(snap) = latest_snap {
+                        *last_cpu_temp_timer.borrow_mut() = snap.cpu.temperature_c;
                         apply_snapshot(&ui, snap, &cfg, &detected_poll, &models);
                     }
                 }
@@ -1112,6 +1171,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
     );
+
+    // Prompt único no Windows se temperatura da CPU seguir indisponível após 3.5s
+    #[cfg(target_os = "windows")]
+    let _pawnio_prompt_timer = {
+        let t = slint::Timer::default();
+        let config_prompt = config.clone();
+        let temp_prompt = last_cpu_temp.clone();
+        let dismiss_pending = pawnio_dismiss_pending.clone();
+        t.start(
+            slint::TimerMode::SingleShot,
+            Duration::from_millis(3500),
+            move || {
+                let (enable_cpu, dismissed, culture) = {
+                    let cfg = config_prompt.borrow();
+                    (cfg.enable_cpu, cfg.pawnio_prompt_dismissed, cfg.culture.clone())
+                };
+                if !enable_cpu
+                    || dismissed
+                    || temp_prompt.borrow().is_some()
+                    || telemetry::pawnio_win::is_sensor_service_running()
+                {
+                    return;
+                }
+
+                let dismiss_pending_bg = dismiss_pending.clone();
+                std::thread::spawn(move || {
+                    let s = i18n::load_locale(&culture);
+                    let accepted = unsafe {
+                        use windows::core::HSTRING;
+                        use windows::Win32::UI::WindowsAndMessaging::{
+                            MessageBoxW, IDYES, MB_ICONQUESTION, MB_YESNO,
+                        };
+                        let title = HSTRING::from(&s.pawnio_prompt_title);
+                        let body = HSTRING::from(&s.pawnio_prompt_msg);
+                        MessageBoxW(None, &body, &title, MB_YESNO | MB_ICONQUESTION) == IDYES
+                    };
+
+                    if accepted {
+                        if let Err(e) = telemetry::pawnio_win::launch_elevated_pawnio_setup() {
+                            log_msg(&format!("[PawnIO] Setup elevado recusado/falhou: {}", e));
+                            dismiss_pending_bg.store(true, std::sync::atomic::Ordering::SeqCst);
+                        }
+                    } else {
+                        log_msg("[PawnIO] Usuário optou por não instalar o driver PawnIO no momento.");
+                        dismiss_pending_bg.store(true, std::sync::atomic::Ordering::SeqCst);
+                    }
+                });
+            },
+        );
+        t
+    };
 
     // Verificação de atualização em segundo plano (se habilitado)
     if config.borrow().auto_update {
