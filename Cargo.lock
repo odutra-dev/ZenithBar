@@ -7,6 +7,7 @@ name = "ZenithBar"
 version = "0.6.2"
 dependencies = [
  "chrono",
+ "ksni",
  "serde",
  "serde_json",
  "slint",
@@ -16,6 +17,7 @@ dependencies = [
  "ureq",
  "windows",
  "winres",
+ "x11rb",
 ]
 
 [[package]]
@@ -4103,6 +4105,7 @@ dependencies = [
  "const-field-offset",
  "i-slint-backend-linuxkms",
  "i-slint-backend-selector",
+ "i-slint-backend-winit",
  "i-slint-common",
  "i-slint-core",
  "i-slint-core-macros",
@@ -4111,6 +4114,7 @@ dependencies = [
  "num-traits",
  "once_cell",
  "pin-weak",
+ "raw-window-handle",
  "slint-macros",
  "unicode-segmentation",
  "vtable",
