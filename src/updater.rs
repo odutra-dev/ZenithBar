@@ -13,7 +13,7 @@ pub struct ReleaseInfo {
 }
 
 fn parse_version(v: &str) -> (u32, u32, u32) {
-    let clean = v.trim_start_matches(|c| c == 'v' || c == 'V');
+    let clean = v.trim_start_matches(['v', 'V']);
     let mut parts = clean.split('.');
     let maj = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
     let min = parts.next().and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -65,12 +65,11 @@ pub fn check_github_release() -> Result<Option<ReleaseInfo>, String> {
             #[cfg(not(target_os = "windows"))]
             let matches = asset_name.ends_with(".AppImage") || asset_name.eq_ignore_ascii_case("ZenithBar");
 
-            if matches {
-                if let Some(url) = asset["browser_download_url"].as_str() {
+            if matches
+                && let Some(url) = asset["browser_download_url"].as_str() {
                     download_url = Some(url.to_string());
                     break;
                 }
-            }
         }
     }
 
@@ -92,9 +91,31 @@ pub fn check_github_release() -> Result<Option<ReleaseInfo>, String> {
     }))
 }
 
+#[cfg(any(not(target_os = "windows"), test))]
+fn resolve_linux_update_target(
+    appimage_env: Option<std::ffi::OsString>,
+    current_exe: std::path::PathBuf,
+) -> std::path::PathBuf {
+    if let Some(appimage_path) = appimage_env
+        && !appimage_path.is_empty() {
+            return std::path::PathBuf::from(appimage_path);
+        }
+    current_exe
+}
+
 pub fn download_and_install_update(download_url: &str) -> Result<(), String> {
     let current_exe = std::env::current_exe().map_err(|e| format!("Could not get current executable path: {}", e))?;
-    let temp_file = std::env::temp_dir().join(format!("zenithbar_update_{}.tmp", std::process::id()));
+    #[cfg(not(target_os = "windows"))]
+    let target_exe = resolve_linux_update_target(std::env::var_os("APPIMAGE"), current_exe);
+    #[cfg(target_os = "windows")]
+    let target_exe = current_exe;
+
+    let temp_dir = target_exe
+        .parent()
+        .filter(|p| p.exists())
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(std::env::temp_dir);
+    let temp_file = temp_dir.join(format!("zenithbar_update_{}.tmp", std::process::id()));
 
     let agent = ureq::AgentBuilder::new()
         .timeout(Duration::from_secs(120))
@@ -125,24 +146,24 @@ pub fn download_and_install_update(download_url: &str) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        let old_exe = current_exe.with_extension("exe.old");
+        let old_exe = target_exe.with_extension("exe.old");
         if old_exe.exists() {
             let _ = fs::remove_file(&old_exe);
         }
 
         // On Windows, rename active running .exe to .exe.old
-        fs::rename(&current_exe, &old_exe)
+        fs::rename(&target_exe, &old_exe)
             .map_err(|e| format!("Failed to rename current executable to .old: {}", e))?;
 
         // Move downloaded binary into active position
-        if let Err(e) = fs::rename(&temp_file, &current_exe) {
+        if let Err(e) = fs::rename(&temp_file, &target_exe) {
             // Restore previous exe if move fails
-            let _ = fs::rename(&old_exe, &current_exe);
+            let _ = fs::rename(&old_exe, &target_exe);
             return Err(format!("Failed to move update into position: {}", e));
         }
 
         // Spawn updated executable
-        let _ = std::process::Command::new(&current_exe)
+        let _ = std::process::Command::new(&target_exe)
             .arg("--restarted")
             .spawn()
             .map_err(|e| format!("Failed to spawn updated process: {}", e))?;
@@ -156,16 +177,16 @@ pub fn download_and_install_update(download_url: &str) -> Result<(), String> {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(&temp_file, fs::Permissions::from_mode(0o755));
 
-        let old_exe = current_exe.with_extension("old");
+        let old_exe = target_exe.with_extension("old");
         if old_exe.exists() {
             let _ = fs::remove_file(&old_exe);
         }
-        let _ = fs::rename(&current_exe, &old_exe);
-        if let Err(e) = fs::rename(&temp_file, &current_exe) {
-            let _ = fs::rename(&old_exe, &current_exe);
+        let _ = fs::rename(&target_exe, &old_exe);
+        if let Err(e) = fs::rename(&temp_file, &target_exe) {
+            let _ = fs::rename(&old_exe, &target_exe);
             return Err(format!("Failed to replace executable: {}", e));
         }
-        let _ = std::process::Command::new(&current_exe)
+        let _ = std::process::Command::new(&target_exe)
             .arg("--restarted")
             .spawn()
             .map_err(|e| format!("Failed to spawn process: {}", e))?;
@@ -205,19 +226,15 @@ fn notify_user_linux(title: &str, body: &str) {
     if let Ok(status) = std::process::Command::new("zenity")
         .args(["--info", "--title", title, "--text", body])
         .status()
-    {
-        if status.success() {
+        && status.success() {
             return;
         }
-    }
     if let Ok(status) = std::process::Command::new("kdialog")
         .args(["--title", title, "--msgbox", body])
         .status()
-    {
-        if status.success() {
+        && status.success() {
             return;
         }
-    }
     let _ = std::process::Command::new("notify-send")
         .args(["-a", "ZenithBar", title, body])
         .status();
@@ -364,5 +381,23 @@ mod tests {
         assert!(!is_newer_version("v0.6.2", "0.6.2"));
         assert!(!is_newer_version("0.6.1", "0.6.2"));
         assert!(!is_newer_version("0.6.2-beta", "0.6.2"));
+    }
+
+    #[test]
+    fn resolve_linux_update_target_prefers_appimage_when_present() {
+        let mount_exe = std::path::PathBuf::from("/tmp/.mount_Zenith/usr/bin/ZenithBar");
+        let appimage = std::ffi::OsString::from("/home/user/Applications/ZenithBar.AppImage");
+        assert_eq!(
+            resolve_linux_update_target(Some(appimage), mount_exe.clone()),
+            std::path::PathBuf::from("/home/user/Applications/ZenithBar.AppImage")
+        );
+        assert_eq!(
+            resolve_linux_update_target(Some(std::ffi::OsString::new()), mount_exe.clone()),
+            mount_exe
+        );
+        assert_eq!(
+            resolve_linux_update_target(None, mount_exe.clone()),
+            mount_exe
+        );
     }
 }
