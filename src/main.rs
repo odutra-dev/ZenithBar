@@ -15,6 +15,8 @@ use appbar::{win32::AppBarManager, DockEdge};
 use chrono::Local;
 use config::AppConfig;
 use monitor::win32::list_monitors;
+#[cfg(not(target_os = "windows"))]
+use monitor::win32::list_monitors_for_window;
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -76,12 +78,11 @@ fn resolve_log_path() -> PathBuf {
 fn rotate_log_file(path: &std::path::Path, max_bytes: u64) {
     let _guard = LOG_LOCK.lock();
     if let Ok(meta) = std::fs::metadata(path)
-        && meta.len() > max_bytes
-    {
-        let backup = path.with_extension("log.old");
-        let _ = std::fs::remove_file(&backup);
-        let _ = std::fs::rename(path, backup);
-    }
+        && meta.len() > max_bytes {
+            let backup = path.with_extension("log.old");
+            let _ = std::fs::remove_file(&backup);
+            let _ = std::fs::rename(path, backup);
+        }
 }
 
 fn log_msg(msg: &str) {
@@ -95,6 +96,47 @@ fn log_msg(msg: &str) {
         .and_then(|mut f| writeln!(f, "[{}] {}", Local::now().format("%Y-%m-%d %H:%M:%S"), msg));
 }
 
+#[cfg(any(not(target_os = "windows"), test))]
+fn should_prefer_xwayland(
+    wayland_display: Option<&str>,
+    xdg_session_type: Option<&str>,
+    x11_display: Option<&str>,
+    winit_backend: Option<&str>,
+) -> bool {
+    let already_set = winit_backend.is_some_and(|v| !v.trim().is_empty());
+    if already_set {
+        return false;
+    }
+    let has_x11 = x11_display.is_some_and(|v| !v.trim().is_empty());
+    if !has_x11 {
+        return false;
+    }
+    
+    wayland_display.is_some_and(|v| !v.trim().is_empty())
+        || xdg_session_type.is_some_and(|v| v.trim().eq_ignore_ascii_case("wayland"))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn configure_linux_display_backend() {
+    let wayland_display = std::env::var("WAYLAND_DISPLAY").ok();
+    let xdg_session = std::env::var("XDG_SESSION_TYPE").ok();
+    let x11_display = std::env::var("DISPLAY").ok();
+    let winit_backend = std::env::var("WINIT_UNIX_BACKEND").ok();
+
+    if should_prefer_xwayland(
+        wayland_display.as_deref(),
+        xdg_session.as_deref(),
+        x11_display.as_deref(),
+        winit_backend.as_deref(),
+    ) {
+        // Native Wayland xdg_toplevel ignores client positioning and centers windows;
+        // XWayland preserves edge docking and X11 hints when DISPLAY is available.
+        unsafe {
+            std::env::set_var("WINIT_UNIX_BACKEND", "x11");
+        }
+    }
+}
+
 fn appbar_hide(ui: &AppWindow, ab: &mut Option<AppBarManager>, is_vis: &RefCell<bool>) {
     if let Some(ab_mgr) = ab.as_mut() {
         ab_mgr.unregister();
@@ -102,8 +144,6 @@ fn appbar_hide(ui: &AppWindow, ab: &mut Option<AppBarManager>, is_vis: &RefCell<
     } else {
         let _ = ui.hide();
     }
-    #[cfg(not(target_os = "windows"))]
-    let _ = ui.hide();
     *is_vis.borrow_mut() = false;
     log_msg("Barra ocultada para a bandeja (AppBar liberado).");
 }
@@ -115,8 +155,6 @@ fn appbar_show(ui: &AppWindow, ab: &mut Option<AppBarManager>, is_vis: &RefCell<
     } else {
         let _ = ui.show();
     }
-    #[cfg(not(target_os = "windows"))]
-    let _ = ui.show();
     *is_vis.borrow_mut() = true;
     log_msg("Barra reexibida na tela (AppBar registrado).");
 }
@@ -287,11 +325,14 @@ fn sync_monitor_height(ui: &AppWindow, monitors: &[monitor::MonitorDevice], scre
     ui.set_sidebar_height_px(logical_h);
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_settings_to_app(
     ui: &AppWindow,
     sw: &SettingsWindow,
     cfg: &mut AppConfig,
     ab: &mut Option<AppBarManager>,
+    tray_holder: &mut Option<TrayIcon>,
+    hwnd_raw: isize,
     monitors: &[monitor::MonitorDevice],
     ctrl_tx: &std::sync::mpsc::Sender<TelemetryControl>,
 ) {
@@ -301,6 +342,7 @@ fn apply_settings_to_app(
     let appbar_changed = cfg.use_app_bar != sw.get_use_app_bar();
     let always_top_changed = cfg.always_top != sw.get_always_top();
     let click_through_changed = cfg.click_through != sw.get_click_through();
+    let tray_changed = cfg.show_tray_icon != sw.get_show_tray_icon();
 
     cfg.set_dock_right(sw.get_dock_right());
     cfg.screen_index = sw.get_monitor_idx().max(0) as usize;
@@ -366,7 +408,20 @@ fn apply_settings_to_app(
     tray::win32::set_always_top_state(cfg.always_top);
     tray::win32::set_tray_culture(&cfg.culture);
 
-    // Atualiza o AppBar nativo Win32
+    if tray_changed {
+        if cfg.show_tray_icon {
+            if tray_holder.is_none() {
+                let mut tray = TrayIcon::new(hwnd_raw);
+                if tray.init() {
+                    *tray_holder = Some(tray);
+                }
+            }
+        } else {
+            *tray_holder = None;
+        }
+    }
+
+    // Atualiza o AppBar nativo (Win32 / Linux)
     if let Some(ab_mgr) = ab.as_mut() {
         if always_top_changed {
             ab_mgr.set_always_top(cfg.always_top);
@@ -394,6 +449,9 @@ fn apply_settings_to_app(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(not(target_os = "windows"))]
+    configure_linux_display_backend();
+
     // Setup panic hook with log file and native Windows Message Box
     std::panic::set_hook(Box::new(|info| {
         let msg = format!("FATAL ERROR:\n{:?}\n", info);
@@ -539,14 +597,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Detectar monitores
-    let monitors = list_monitors();
-    log_msg(&format!("Monitores detectados: {}", monitors.len()));
+    let monitors = Rc::new(RefCell::new(list_monitors()));
+    log_msg(&format!("Monitores detectados inicialmente: {}", monitors.borrow().len()));
     let target_monitor = {
+        let mons = monitors.borrow();
         let cfg = config.borrow();
-        if cfg.screen_index < monitors.len() {
-            monitors[cfg.screen_index].clone()
+        if cfg.screen_index < mons.len() {
+            mons[cfg.screen_index].clone()
         } else {
-            monitors[0].clone()
+            mons[0].clone()
         }
     };
 
@@ -559,16 +618,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         config.borrow().apply_startup();
 
         let cfg = config.borrow();
-        let physical_w = if scale > 0.0 { (cfg.sidebar_width as f32 * scale).round() as i32 } else { cfg.sidebar_width as i32 };
-        let init_x = if cfg.is_dock_right() {
-            target_monitor.work_right - physical_w
-        } else {
-            target_monitor.work_left
-        };
-        let init_y = target_monitor.work_top;
+        let edge = if cfg.is_dock_right() { DockEdge::Right } else { DockEdge::Left };
+        let (init_x, init_y, _, _) =
+            appbar::compute_dock_geometry(edge, cfg.sidebar_width as i32, scale, &target_monitor);
         ui.window().set_position(slint::PhysicalPosition::new(init_x, init_y));
         log_msg(&format!("Posição inicial ancorada pré-configurada: ({}, {})", init_x, init_y));
     }
+
+    let hwnd_holder: Rc<RefCell<isize>> = Rc::new(RefCell::new(0));
 
     // Gerenciador do AppBar e Ãcone da Bandeja mantidos vivos
     let appbar_holder: Rc<RefCell<Option<AppBarManager>>> = Rc::new(RefCell::new(None));
@@ -639,11 +696,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ui.set_is_docked_right(new_right);
             let _ = cfg.save();
             let edge = if new_right { DockEdge::Right } else { DockEdge::Left };
-            if let Ok(mut ab_guard) = appbar_toggle.try_borrow_mut() {
-                if let Some(ab) = ab_guard.as_mut() {
+            if let Ok(mut ab_guard) = appbar_toggle.try_borrow_mut()
+                && let Some(ab) = ab_guard.as_mut() {
                     ab.set_edge(edge);
                 }
-            }
         }
     });
 
@@ -656,21 +712,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             cfg.use_app_bar = !cfg.use_app_bar;
             ui.set_is_appbar(cfg.use_app_bar);
             let _ = cfg.save();
-            if let Ok(mut ab_guard) = appbar_mode.try_borrow_mut() {
-                if let Some(ab) = ab_guard.as_mut() {
+            if let Ok(mut ab_guard) = appbar_mode.try_borrow_mut()
+                && let Some(ab) = ab_guard.as_mut() {
                     ab.set_appbar_mode(cfg.use_app_bar);
                 }
-            }
         }
     });
 
     let settings_weak = settings_ui.as_weak();
     let config_for_settings = config.clone();
-    let monitors_len = monitors.len();
+    let monitors_for_settings = monitors.clone();
     ui.on_request_open_settings(move || {
         if let Some(sw) = settings_weak.upgrade() {
             let cfg = config_for_settings.borrow();
-            populate_settings_ui(&sw, &cfg, monitors_len);
+            let count = monitors_for_settings.borrow().len();
+            populate_settings_ui(&sw, &cfg, count);
             let _ = sw.show();
         }
     });
@@ -680,11 +736,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let appbar_quit = appbar_holder.clone();
     let is_vis_quit = is_visible.clone();
     ui.on_request_quit(move || {
-        if let Some(ui) = ui_weak_quit.upgrade() {
-            if let Ok(mut ab_guard) = appbar_quit.try_borrow_mut() {
+        if let Some(ui) = ui_weak_quit.upgrade()
+            && let Ok(mut ab_guard) = appbar_quit.try_borrow_mut() {
                 appbar_hide(&ui, &mut ab_guard, &is_vis_quit);
             }
-        }
     });
 
     // Callbacks da Janela de ConfiguraÃ§Ãµes
@@ -715,12 +770,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_apply = config.clone();
     let ui_weak_apply = ui.as_weak();
     let appbar_apply = appbar_holder.clone();
+    let tray_apply = tray_holder.clone();
+    let hwnd_apply = hwnd_holder.clone();
     let monitors_apply = monitors.clone();
     settings_ui.on_request_apply(move || {
         if let (Some(sw), Some(ui)) = (settings_weak_apply.upgrade(), ui_weak_apply.upgrade()) {
             let mut cfg = config_apply.borrow_mut();
-            if let Ok(mut ab_guard) = appbar_apply.try_borrow_mut() {
-                apply_settings_to_app(&ui, &sw, &mut cfg, &mut ab_guard, &monitors_apply, &ctrl_apply);
+            let mons = monitors_apply.borrow();
+            if let (Ok(mut ab_guard), Ok(mut tray_guard)) =
+                (appbar_apply.try_borrow_mut(), tray_apply.try_borrow_mut())
+            {
+                apply_settings_to_app(
+                    &ui,
+                    &sw,
+                    &mut cfg,
+                    &mut ab_guard,
+                    &mut tray_guard,
+                    *hwnd_apply.borrow(),
+                    &mons,
+                    &ctrl_apply,
+                );
             }
         }
     });
@@ -731,12 +800,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_save = config.clone();
     let ui_weak_save = ui.as_weak();
     let appbar_save = appbar_holder.clone();
+    let tray_save = tray_holder.clone();
+    let hwnd_save = hwnd_holder.clone();
     let monitors_save = monitors.clone();
     settings_ui.on_request_save(move || {
         if let (Some(sw), Some(ui)) = (settings_weak_save.upgrade(), ui_weak_save.upgrade()) {
             let mut cfg = config_save.borrow_mut();
-            if let Ok(mut ab_guard) = appbar_save.try_borrow_mut() {
-                apply_settings_to_app(&ui, &sw, &mut cfg, &mut ab_guard, &monitors_save, &ctrl_save);
+            let mons = monitors_save.borrow();
+            if let (Ok(mut ab_guard), Ok(mut tray_guard)) =
+                (appbar_save.try_borrow_mut(), tray_save.try_borrow_mut())
+            {
+                apply_settings_to_app(
+                    &ui,
+                    &sw,
+                    &mut cfg,
+                    &mut ab_guard,
+                    &mut tray_guard,
+                    *hwnd_save.borrow(),
+                    &mons,
+                    &ctrl_save,
+                );
             }
             let _ = sw.hide();
         }
@@ -763,7 +846,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let detected_poll = detected_names.clone();
     let is_vis_clone = is_visible.clone();
     let appbar_tray = appbar_holder.clone();
-    let monitors_tray_count = monitors.len();
     let monitors_tray_list = monitors.clone();
 
     let telemetry_timer = slint::Timer::default();
@@ -772,105 +854,94 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Duration::from_millis(100),
         move || {
             // Poll eventos da bandeja (Tray)
-            if let Ok(tray_guard) = tray_ref.try_borrow() {
-                if let Some(tray) = tray_guard.as_ref() {
+            if let Ok(tray_guard) = tray_ref.try_borrow()
+                && let Some(tray) = tray_guard.as_ref() {
                     let events = tray.poll_events();
 
-                    if events.toggle_vis {
-                        if let Some(ui) = ui_weak_timer.upgrade() {
-                            if let Ok(mut ab_guard) = appbar_tray.try_borrow_mut() {
+                    if events.toggle_vis
+                        && let Some(ui) = ui_weak_timer.upgrade()
+                            && let Ok(mut ab_guard) = appbar_tray.try_borrow_mut() {
                                 if *is_vis_clone.borrow() {
                                     appbar_hide(&ui, &mut ab_guard, &is_vis_clone);
                                 } else {
                                     appbar_show(&ui, &mut ab_guard, &is_vis_clone);
                                 }
                             }
-                        }
-                    }
 
-                    if events.open_settings {
-                        if let Some(sw) = settings_weak_timer.upgrade() {
+                    if events.open_settings
+                        && let Some(sw) = settings_weak_timer.upgrade() {
                             let cfg = config_poll.borrow();
-                            populate_settings_ui(&sw, &cfg, monitors_tray_count);
+                            let count = monitors_tray_list.borrow().len();
+                            populate_settings_ui(&sw, &cfg, count);
                             let _ = sw.show();
                         }
-                    }
 
-                    if events.toggle_side {
-                        if let Some(ui) = ui_weak_timer.upgrade() {
+                    if events.toggle_side
+                        && let Some(ui) = ui_weak_timer.upgrade() {
                             let mut cfg = config_poll.borrow_mut();
                             let new_right = !cfg.is_dock_right();
                             cfg.set_dock_right(new_right);
                             ui.set_is_docked_right(new_right);
                             let _ = cfg.save();
                             let edge = if new_right { DockEdge::Right } else { DockEdge::Left };
-                            if let Ok(mut ab_guard) = appbar_tray.try_borrow_mut() {
-                                if let Some(ab) = ab_guard.as_mut() {
+                            if let Ok(mut ab_guard) = appbar_tray.try_borrow_mut()
+                                && let Some(ab) = ab_guard.as_mut() {
                                     ab.set_edge(edge);
                                 }
-                            }
                         }
-                    }
 
                     if events.cycle_screen {
                         let mut cfg = config_poll.borrow_mut();
-                        if monitors_tray_count > 0 {
-                            cfg.screen_index = (cfg.screen_index + 1) % monitors_tray_count;
+                        let mons = monitors_tray_list.borrow();
+                        let count = mons.len();
+                        if count > 0 {
+                            cfg.screen_index = (cfg.screen_index + 1) % count;
                             let _ = cfg.save();
                             if let Some(ui) = ui_weak_timer.upgrade() {
-                                sync_monitor_height(&ui, &monitors_tray_list, cfg.screen_index);
+                                sync_monitor_height(&ui, &mons, cfg.screen_index);
                             }
-                            if let Ok(mut ab_guard) = appbar_tray.try_borrow_mut() {
-                                if let Some(ab) = ab_guard.as_mut() {
-                                    if cfg.screen_index < monitors_tray_list.len() {
-                                        ab.set_monitor(monitors_tray_list[cfg.screen_index].clone());
+                            if let Ok(mut ab_guard) = appbar_tray.try_borrow_mut()
+                                && let Some(ab) = ab_guard.as_mut()
+                                    && cfg.screen_index < mons.len() {
+                                        ab.set_monitor(mons[cfg.screen_index].clone());
                                     }
-                                }
-                            }
                         }
                     }
 
-                    if events.toggle_appbar {
-                        if let Some(ui) = ui_weak_timer.upgrade() {
+                    if events.toggle_appbar
+                        && let Some(ui) = ui_weak_timer.upgrade() {
                             let mut cfg = config_poll.borrow_mut();
                             cfg.use_app_bar = !cfg.use_app_bar;
                             ui.set_is_appbar(cfg.use_app_bar);
                             let _ = cfg.save();
-                            if let Ok(mut ab_guard) = appbar_tray.try_borrow_mut() {
-                                if let Some(ab) = ab_guard.as_mut() {
+                            if let Ok(mut ab_guard) = appbar_tray.try_borrow_mut()
+                                && let Some(ab) = ab_guard.as_mut() {
                                     ab.set_appbar_mode(cfg.use_app_bar);
                                 }
-                            }
                         }
-                    }
 
                     if events.reload_sensors {
                         log_msg("Recarregar sensores solicitado via menu da bandeja.");
                         let _ = ctrl_tx.send(TelemetryControl::ReloadSensors);
                     }
 
-                    if events.update_pos {
-                        if let Ok(ab_guard) = appbar_tray.try_borrow() {
-                            if let Some(ab) = ab_guard.as_ref() {
+                    if events.update_pos
+                        && let Ok(ab_guard) = appbar_tray.try_borrow()
+                            && let Some(ab) = ab_guard.as_ref() {
                                 ab.update_position();
                             }
-                        }
-                    }
 
-                    if events.show_window {
-                        if let Some(ui) = ui_weak_timer.upgrade() {
-                            if let Ok(mut ab_guard) = appbar_tray.try_borrow_mut() {
+                    if events.show_window
+                        && let Some(ui) = ui_weak_timer.upgrade()
+                            && let Ok(mut ab_guard) = appbar_tray.try_borrow_mut() {
                                 appbar_show(&ui, &mut ab_guard, &is_vis_clone);
                             }
-                        }
-                    }
 
                     if events.exit {
                         log_msg("Saída solicitada pelo menu da bandeja.");
                         let _ = slint::quit_event_loop();
                     }
                 }
-            }
 
             // Atualiza telemetria
             if let Some(ui) = ui_weak_timer.upgrade() {
@@ -902,9 +973,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Timer de inicializaÃ§Ã£o pÃ³s-mapeamento (150ms)
     let init_timer = slint::Timer::default();
-    #[allow(unused_variables)]
     let ui_weak_init = ui.as_weak();
     let is_vis_init = is_visible.clone();
+    let tray_init = tray_holder.clone();
+    let hwnd_init = hwnd_holder.clone();
+    let monitors_init = monitors.clone();
     init_timer.start(
         slint::TimerMode::SingleShot,
         Duration::from_millis(150),
@@ -912,8 +985,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             log_msg("5. Timer pÃ³s-mapeamento: aplicando estilos de janela, DWM, Tray e AppBar...");
             #[cfg(target_os = "windows")]
             {
+                let _ = &monitors_init;
                 if let Some(hwnd) = find_main_hwnd() {
                     let hwnd_isize = hwnd.0 as isize;
+                    *hwnd_init.borrow_mut() = hwnd_isize;
                     log_msg(&format!("Janela HWND encontrada: 0x{:X}", hwnd_isize));
 
                         // 1. DWM Mica / Acrylic
@@ -926,9 +1001,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let mut tray = TrayIcon::new(hwnd_isize);
                             if tray.init() {
                                 log_msg("Ãcone na bandeja do sistema inicializado com sucesso.");
-                                *tray_holder.borrow_mut() = Some(tray);
+                                *tray_init.borrow_mut() = Some(tray);
                             } else {
-                                log_msg("Aviso: Falha ao inicializar Ã­cone na bandeja.");
+                                log_msg("Aviso: Falha ao inicializar ícone na bandeja.");
                             }
                         }
 
@@ -947,6 +1022,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             cfg.always_top,
                             cfg.click_through,
                         );
+                        ab.attach_window(ui_weak_init.clone());
 
                         if cfg.use_app_bar && !cfg.initially_hidden {
                             log_msg("Registrando Windows AppBar...");
@@ -973,12 +1049,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             #[cfg(not(target_os = "windows"))]
             {
                 log_msg("5. [Linux] Inicializando Tray, AppBar e ancoragem de tela...");
+                let _ = &hwnd_init;
+                let ui_opt = ui_weak_init.upgrade();
+                let detected_mons = list_monitors_for_window(ui_opt.as_ref().map(|u| u.window()));
+                if !detected_mons.is_empty() {
+                    *monitors_init.borrow_mut() = detected_mons;
+                    log_msg(&format!(
+                        "[Linux] Monitores atualizados pós-mapeamento: {}",
+                        monitors_init.borrow().len()
+                    ));
+                }
+
                 let cfg = config_ref.borrow();
+                let active_monitor = {
+                    let mons = monitors_init.borrow();
+                    if cfg.screen_index < mons.len() {
+                        mons[cfg.screen_index].clone()
+                    } else {
+                        mons.first().cloned().unwrap_or_else(|| target_monitor.clone())
+                    }
+                };
+                if let Some(ui) = ui_opt.as_ref() {
+                    sync_monitor_height(ui, &monitors_init.borrow(), cfg.screen_index);
+                }
+
                 if cfg.show_tray_icon {
                     let mut tray = TrayIcon::new(0);
                     if tray.init() {
-                        log_msg("Ãcone na bandeja do sistema inicializado com sucesso.");
-                        *tray_holder.borrow_mut() = Some(tray);
+                        log_msg("Ícone na bandeja do sistema inicializado com sucesso.");
+                        *tray_init.borrow_mut() = Some(tray);
                     }
                 }
 
@@ -992,25 +1091,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     0,
                     edge,
                     cfg.sidebar_width as i32,
-                    target_monitor.clone(),
+                    active_monitor,
                     cfg.always_top,
                     cfg.click_through,
                 );
+                ab.attach_window(ui_weak_init.clone());
 
                 if cfg.use_app_bar && !cfg.initially_hidden {
                     let _ = ab.register();
                 } else if !cfg.initially_hidden {
                     ab.update_position();
                 }
-                *appbar_ref.borrow_mut() = Some(ab);
 
                 if cfg.initially_hidden {
                     log_msg("Modo InitiallyHidden ativo no Linux.");
-                    if let Some(ui) = ui_weak_init.upgrade() {
-                        let _ = ui.hide();
-                    }
+                    ab.hide_window();
                     *is_vis_init.borrow_mut() = false;
                 }
+                *appbar_ref.borrow_mut() = Some(ab);
             }
         },
     );
@@ -1364,5 +1462,19 @@ mod tests {
         let (val, text) = format_temp_c(Some(64.6));
         assert!((val - 64.6).abs() < 0.001);
         assert_eq!(text, "65°C");
+    }
+
+    #[test]
+    fn should_prefer_xwayland_detects_wayland_with_x11_fallback() {
+        assert!(should_prefer_xwayland(Some("wayland-0"), Some("wayland"), Some(":0"), None));
+        assert!(should_prefer_xwayland(None, Some("Wayland"), Some(":1"), Some("")));
+        assert!(!should_prefer_xwayland(Some("wayland-0"), Some("wayland"), None, None));
+        assert!(!should_prefer_xwayland(None, Some("x11"), Some(":0"), None));
+        assert!(!should_prefer_xwayland(
+            Some("wayland-0"),
+            Some("wayland"),
+            Some(":0"),
+            Some("wayland")
+        ));
     }
 }
