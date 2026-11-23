@@ -4,6 +4,7 @@ use sysinfo::{Components, CpuRefreshKind, Disks, MemoryRefreshKind, Networks, Re
 
 mod disk_win;
 mod gpu_win;
+pub mod pawnio_win;
 mod shm_win;
 mod wmi_win;
 
@@ -103,6 +104,8 @@ pub struct TelemetryEngine {
     win_shm: shm_win::WindowsShmMonitor,
     #[cfg(target_os = "windows")]
     win_wmi: wmi_win::WindowsWmiMonitor,
+    #[cfg(target_os = "windows")]
+    win_pawnio: pawnio_win::PawnIoCpuReader,
 }
 
 impl TelemetryEngine {
@@ -169,6 +172,8 @@ impl TelemetryEngine {
             win_shm: shm_win::WindowsShmMonitor::new(),
             #[cfg(target_os = "windows")]
             win_wmi: wmi_win::WindowsWmiMonitor::new(),
+            #[cfg(target_os = "windows")]
+            win_pawnio: pawnio_win::PawnIoCpuReader::new(),
         }
     }
 
@@ -194,6 +199,7 @@ impl TelemetryEngine {
             self.win_gpu = gpu_win::WindowsGpuMonitor::new();
             self.win_shm = shm_win::WindowsShmMonitor::new();
             self.win_wmi = wmi_win::WindowsWmiMonitor::new();
+            self.win_pawnio = pawnio_win::PawnIoCpuReader::new();
         }
     }
 
@@ -290,6 +296,10 @@ impl TelemetryEngine {
                 if gpu.fan_percent.is_none() {
                     gpu.fan_percent = wmi.gpu_fan_percent;
                 }
+            }
+
+            if cpu.temperature_c.is_none() {
+                cpu.temperature_c = self.win_pawnio.sample_cpu_temp();
             }
         }
 

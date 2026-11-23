@@ -274,6 +274,7 @@ mod win_impl {
     }
 
     pub struct WindowsShmMonitor {
+        logged_zenith_shm: bool,
         logged_hwinfo: bool,
         logged_coretemp: bool,
     }
@@ -281,6 +282,7 @@ mod win_impl {
     impl WindowsShmMonitor {
         pub fn new() -> Self {
             Self {
+                logged_zenith_shm: false,
                 logged_hwinfo: false,
                 logged_coretemp: false,
             }
@@ -292,12 +294,28 @@ mod win_impl {
                 return out;
             }
 
+            if need_cpu_temp
+                && let Some(zenith_temp) = read_zenith_sensor_shm()
+            {
+                if !self.logged_zenith_shm {
+                    self.logged_zenith_shm = true;
+                    crate::log_msg("[SHM Win] ZenithBarSensor Shared Memory detectada.");
+                }
+                out.cpu_temp_c = Some(zenith_temp);
+            }
+
             if let Some(hw) = read_hwinfo_shm() {
                 if !self.logged_hwinfo {
                     self.logged_hwinfo = true;
                     crate::log_msg("[SHM Win] HWiNFO Shared Memory detectada.");
                 }
-                out = hw;
+                if out.cpu_temp_c.is_none() {
+                    out.cpu_temp_c = hw.cpu_temp_c;
+                }
+                out.gpu_temp_c = hw.gpu_temp_c;
+                out.gpu_clock_ghz = hw.gpu_clock_ghz;
+                out.gpu_usage = hw.gpu_usage;
+                out.gpu_fan_percent = hw.gpu_fan_percent;
             }
 
             if need_cpu_temp && out.cpu_temp_c.is_none() {
@@ -311,6 +329,24 @@ mod win_impl {
             }
 
             out
+        }
+    }
+
+    fn read_zenith_sensor_shm() -> Option<f32> {
+        use crate::telemetry::pawnio_win::{now_unix_ms, parse_zenith_shm_bytes, ZenithSensorShm};
+        unsafe {
+            let handle = open_mapping_candidates(&[
+                w!("Global\\ZenithBar_SensorShm"),
+                w!("Local\\ZenithBar_SensorShm"),
+                w!("ZenithBar_SensorShm"),
+            ])?;
+            let size = std::mem::size_of::<ZenithSensorShm>();
+            let view = MappedView(MapViewOfFile(handle.0, FILE_MAP_READ, 0, 0, size));
+            if view.0.Value.is_null() {
+                return None;
+            }
+            let bytes = std::slice::from_raw_parts(view.0.Value as *const u8, size);
+            parse_zenith_shm_bytes(bytes, now_unix_ms())
         }
     }
 
