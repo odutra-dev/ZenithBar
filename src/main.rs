@@ -17,7 +17,9 @@ use config::AppConfig;
 use monitor::win32::list_monitors;
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use telemetry::{TelemetryEngine, TelemetrySnapshot};
 use tray::win32::TrayIcon;
@@ -25,23 +27,71 @@ use tray::win32::TrayIcon;
 slint::include_modules!();
 
 const MAX_LOG_BYTES: u64 = 1_048_576; // 1 MB
+static LOG_LOCK: Mutex<()> = Mutex::new(());
+static LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+fn resolve_log_path() -> PathBuf {
+    LOG_PATH
+        .get_or_init(|| {
+            if std::path::Path::new("Settings.json").exists() {
+                return PathBuf::from("zenithbar.log");
+            }
+
+            #[cfg(target_os = "windows")]
+            if let Ok(appdata) = std::env::var("LOCALAPPDATA").or_else(|_| std::env::var("APPDATA"))
+            {
+                let dir = PathBuf::from(appdata).join("ZenithBar");
+                let _ = std::fs::create_dir_all(&dir);
+                return dir.join("zenithbar.log");
+            }
+
+            #[cfg(not(target_os = "windows"))]
+            {
+                let state_dir = if let Ok(xdg) = std::env::var("XDG_STATE_HOME") {
+                    if !xdg.is_empty() {
+                        Some(PathBuf::from(xdg).join("zenithbar"))
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+                .or_else(|| {
+                    std::env::var("HOME")
+                        .ok()
+                        .map(|h| PathBuf::from(h).join(".local/state/zenithbar"))
+                });
+
+                if let Some(dir) = state_dir {
+                    let _ = std::fs::create_dir_all(&dir);
+                    return dir.join("zenithbar.log");
+                }
+            }
+
+            PathBuf::from("zenithbar.log")
+        })
+        .clone()
+}
 
 fn rotate_log_file(path: &std::path::Path, max_bytes: u64) {
-    if let Ok(meta) = std::fs::metadata(path) {
-        if meta.len() > max_bytes {
-            let backup = path.with_extension("log.old");
-            let _ = std::fs::remove_file(&backup);
-            let _ = std::fs::rename(path, backup);
-        }
+    let _guard = LOG_LOCK.lock();
+    if let Ok(meta) = std::fs::metadata(path)
+        && meta.len() > max_bytes
+    {
+        let backup = path.with_extension("log.old");
+        let _ = std::fs::remove_file(&backup);
+        let _ = std::fs::rename(path, backup);
     }
 }
 
 fn log_msg(msg: &str) {
     use std::io::Write;
+    let _guard = LOG_LOCK.lock();
+    let log_path = resolve_log_path();
     let _ = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open("zenithbar.log")
+        .open(&log_path)
         .and_then(|mut f| writeln!(f, "[{}] {}", Local::now().format("%Y-%m-%d %H:%M:%S"), msg));
 }
 
@@ -348,7 +398,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::panic::set_hook(Box::new(|info| {
         let msg = format!("FATAL ERROR:\n{:?}\n", info);
         log_msg(&msg);
-        let _ = std::fs::write("zenithbar_crash.log", &msg);
+        let crash_path = resolve_log_path().with_file_name("zenithbar_crash.log");
+        let _ = std::fs::write(crash_path, &msg);
 
         #[cfg(target_os = "windows")]
         unsafe {
@@ -363,7 +414,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }));
 
-    rotate_log_file(std::path::Path::new("zenithbar.log"), MAX_LOG_BYTES);
+    rotate_log_file(&resolve_log_path(), MAX_LOG_BYTES);
 
     let wait_timeout = if std::env::args().any(|a| a == "--restarted") {
         Duration::from_secs(3)
