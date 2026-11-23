@@ -23,13 +23,27 @@ pub(crate) fn apply_lhm_sensor_reading(
     let ident_l = ident.to_ascii_lowercase();
     let name_l = name.to_ascii_lowercase();
 
-    if ident_l.contains("cpu") && stype == "Temperature" && v > 0.0 && v < 130.0 {
-        let prio = if name_l.contains("package") || name_l.contains("tctl/tdie") {
+    if (ident_l.contains("cpu") || (name_l.contains("cpu") && !ident_l.contains("gpu")))
+        && stype == "Temperature"
+        && !name_l.contains("distance to tjmax")
+        && v > 0.0
+        && v < 130.0
+    {
+        let prio = if name_l.contains("package")
+            || name_l.contains("tctl/tdie")
+            || name_l.contains("cpu die")
+        {
             0
-        } else if name_l.contains("tdie") || name_l.contains("ccds max") {
+        } else if name_l.contains("tdie") || name_l.contains("ccd") {
             1
-        } else {
+        } else if name_l.contains("core max")
+            || name_l.contains("core average")
+            || name_l.contains("core #0")
+            || name_l.contains("core 0")
+        {
             2
+        } else {
+            3
         };
         if prio < *best_cpu_prio {
             *best_cpu_prio = prio;
@@ -57,32 +71,29 @@ pub(crate) fn apply_lhm_sensor_reading(
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-pub(crate) fn cimv2_temp_to_celsius(hp: Option<f32>, raw: Option<f32>) -> Option<f32> {
-    let celsius = hp
-        .and_then(|v| {
-            if v > 2000.0 {
-                Some((v / 10.0) - 273.15)
-            } else if v > 200.0 && v < 450.0 {
-                Some(v - 273.15)
-            } else {
-                None
-            }
-        })
-        .or_else(|| {
-            raw.and_then(|v| {
-                if v > 200.0 && v < 450.0 {
-                    Some(v - 273.15)
-                } else {
-                    None
-                }
-            })
-        })?;
+fn normalize_thermal_reading_to_celsius(v: f32) -> Option<f32> {
+    if !v.is_finite() {
+        return None;
+    }
+    let celsius = if v > 2000.0 && v < 4500.0 {
+        (v / 10.0) - 273.15
+    } else if v > 200.0 && v < 450.0 {
+        v - 273.15
+    } else {
+        return None;
+    };
 
     if celsius > 5.0 && celsius < 130.0 {
         Some(celsius)
     } else {
         None
     }
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn cimv2_temp_to_celsius(hp: Option<f32>, raw: Option<f32>) -> Option<f32> {
+    hp.and_then(normalize_thermal_reading_to_celsius)
+        .or_else(|| raw.and_then(normalize_thermal_reading_to_celsius))
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
@@ -104,7 +115,13 @@ mod win_impl {
         CoCreateInstance, CoInitializeEx, CoSetProxyBlanket, CoUninitialize, CLSCTX_INPROC_SERVER,
         COINIT_MULTITHREADED, EOAC_NONE, RPC_C_AUTHN_LEVEL_CALL, RPC_C_IMP_LEVEL_IMPERSONATE,
     };
-    use windows::Win32::System::Variant::{VariantClear, VARIANT, VT_BSTR, VT_I4, VT_R4, VT_UI4};
+    use windows::Win32::System::Performance::{
+        PdhAddEnglishCounterW, PdhCloseQuery, PdhCollectQueryData, PdhOpenQueryW, PDH_HCOUNTER,
+        PDH_HQUERY,
+    };
+    use windows::Win32::System::Variant::{
+        VariantClear, VARIANT, VT_BSTR, VT_I2, VT_I4, VT_I8, VT_R4, VT_R8, VT_UI2, VT_UI4, VT_UI8,
+    };
     use windows::Win32::System::Wmi::{
         IWbemClassObject, IWbemLocator, IWbemServices, WbemLocator, WBEM_FLAG_FORWARD_ONLY,
         WBEM_FLAG_RETURN_IMMEDIATELY, WBEM_INFINITE,
@@ -134,9 +151,13 @@ mod win_impl {
         cim_services: Option<IWbemServices>,
         cim_checked: bool,
         cim_disabled: bool,
+        cim_cooldown: u8,
+        cim_logged_empty: bool,
         acpi_services: Option<IWbemServices>,
         acpi_checked: bool,
         acpi_disabled: bool,
+        pdh_thermal: Option<PdhThermalMonitor>,
+        pdh_thermal_checked: bool,
     }
 
     impl WindowsWmiMonitor {
@@ -160,9 +181,13 @@ mod win_impl {
                     cim_services: None,
                     cim_checked: false,
                     cim_disabled: false,
+                    cim_cooldown: 0,
+                    cim_logged_empty: false,
                     acpi_services: None,
                     acpi_checked: false,
                     acpi_disabled: false,
+                    pdh_thermal: None,
+                    pdh_thermal_checked: false,
                 }
             }
         }
@@ -188,28 +213,46 @@ mod win_impl {
             }
 
             if need_cpu_temp && out.cpu_temp_c.is_none() && !self.cim_disabled {
-                if !self.cim_checked {
-                    self.cim_checked = true;
-                    self.cim_services = self.connect_namespace("root\\CIMV2");
-                    if self.cim_services.is_none() {
-                        self.cim_disabled = true;
+                if self.cim_cooldown > 0 {
+                    self.cim_cooldown -= 1;
+                } else {
+                    if !self.cim_checked {
+                        self.cim_checked = true;
+                        self.cim_services = self.connect_namespace("root\\CIMV2");
+                        if self.cim_services.is_none() {
+                            self.cim_disabled = true;
+                        }
+                    }
+                    if let Some(svc) = self.cim_services.as_ref() {
+                        match query_cimv2_thermal_zone(svc) {
+                            Ok(Some(temp)) => out.cpu_temp_c = Some(temp),
+                            Ok(None) => {
+                                // Perf counter providers can return empty/zero on warm-up; retry periodically.
+                                self.cim_cooldown = 15;
+                                if !self.cim_logged_empty {
+                                    self.cim_logged_empty = true;
+                                    crate::log_msg("[WMI Win] Win32_PerfFormattedData_Counters_ThermalZoneInformation sem sensores térmicos válidos no momento (re-tentativa periódica ativa).");
+                                }
+                            }
+                            Err(err_hr) => {
+                                self.cim_disabled = true;
+                                crate::log_msg(&format!(
+                                    "[WMI Win] Win32_PerfFormattedData_Counters_ThermalZoneInformation indisponível (hr=0x{:08X}).",
+                                    err_hr as u32
+                                ));
+                            }
+                        }
                     }
                 }
-                if let Some(svc) = self.cim_services.as_ref() {
-                    match query_cimv2_thermal_zone(svc) {
-                        Ok(Some(temp)) => out.cpu_temp_c = Some(temp),
-                        Ok(None) => {
-                            self.cim_disabled = true;
-                            crate::log_msg("[WMI Win] Win32_PerfFormattedData_Counters_ThermalZoneInformation sem sensores térmicos válidos.");
-                        }
-                        Err(err_hr) => {
-                            self.cim_disabled = true;
-                            crate::log_msg(&format!(
-                                "[WMI Win] Win32_PerfFormattedData_Counters_ThermalZoneInformation indisponível (hr=0x{:08X}).",
-                                err_hr as u32
-                            ));
-                        }
-                    }
+            }
+
+            if need_cpu_temp && out.cpu_temp_c.is_none() {
+                if !self.pdh_thermal_checked {
+                    self.pdh_thermal_checked = true;
+                    self.pdh_thermal = PdhThermalMonitor::new();
+                }
+                if let Some(pdh) = self.pdh_thermal.as_mut() {
+                    out.cpu_temp_c = pdh.sample();
                 }
             }
 
@@ -300,10 +343,23 @@ mod win_impl {
             let inner = &guard.0.Anonymous.Anonymous;
             if inner.vt == VT_R4 {
                 Some(inner.Anonymous.fltVal)
+            } else if inner.vt == VT_R8 {
+                Some(inner.Anonymous.dblVal as f32)
+            } else if inner.vt == VT_I2 {
+                Some(inner.Anonymous.iVal as f32)
+            } else if inner.vt == VT_UI2 {
+                Some(inner.Anonymous.uiVal as f32)
             } else if inner.vt == VT_I4 {
                 Some(inner.Anonymous.lVal as f32)
             } else if inner.vt == VT_UI4 {
                 Some(inner.Anonymous.ulVal as f32)
+            } else if inner.vt == VT_I8 {
+                Some(inner.Anonymous.llVal as f32)
+            } else if inner.vt == VT_UI8 {
+                Some(inner.Anonymous.ullVal as f32)
+            } else if inner.vt == VT_BSTR {
+                let bstr = &*inner.Anonymous.bstrVal;
+                bstr.to_string().trim().parse::<f32>().ok()
             } else {
                 None
             }
@@ -409,6 +465,94 @@ mod win_impl {
             Ok(max_temp)
         }
     }
+
+    struct PdhThermalMonitor {
+        hquery: PDH_HQUERY,
+        hcounter_hp: PDH_HCOUNTER,
+        hcounter_raw: PDH_HCOUNTER,
+    }
+
+    impl PdhThermalMonitor {
+        fn new() -> Option<Self> {
+            unsafe {
+                let mut hquery = PDH_HQUERY::default();
+                if PdhOpenQueryW(None, 0, &mut hquery) != 0 || hquery.is_invalid() {
+                    return None;
+                }
+
+                let mut hcounter_hp = PDH_HCOUNTER::default();
+                let hp_ok = PdhAddEnglishCounterW(
+                    hquery,
+                    w!("\\Thermal Zone Information(*)\\High Precision Temperature"),
+                    0,
+                    &mut hcounter_hp,
+                ) == 0;
+
+                let mut hcounter_raw = PDH_HCOUNTER::default();
+                let raw_ok = PdhAddEnglishCounterW(
+                    hquery,
+                    w!("\\Thermal Zone Information(*)\\Temperature"),
+                    0,
+                    &mut hcounter_raw,
+                ) == 0;
+
+                if !hp_ok && !raw_ok {
+                    let _ = PdhCloseQuery(hquery);
+                    return None;
+                }
+
+                let _ = PdhCollectQueryData(hquery);
+                Some(Self {
+                    hquery,
+                    hcounter_hp: if hp_ok { hcounter_hp } else { PDH_HCOUNTER::default() },
+                    hcounter_raw: if raw_ok { hcounter_raw } else { PDH_HCOUNTER::default() },
+                })
+            }
+        }
+
+        fn sample(&mut self) -> Option<f32> {
+            unsafe {
+                if PdhCollectQueryData(self.hquery) != 0 {
+                    return None;
+                }
+                let hp_items = if !self.hcounter_hp.is_invalid() {
+                    super::super::gpu_win::read_pdh_double_array(self.hcounter_hp).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                let raw_items = if !self.hcounter_raw.is_invalid() {
+                    super::super::gpu_win::read_pdh_double_array(self.hcounter_raw).unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+
+                let mut max_temp: Option<f32> = None;
+                for (_, val) in hp_items {
+                    if let Some(c) = cimv2_temp_to_celsius(Some(val as f32), None) {
+                        max_temp = Some(max_temp.map_or(c, |m| m.max(c)));
+                    }
+                }
+                if max_temp.is_none() {
+                    for (_, val) in raw_items {
+                        if let Some(c) = cimv2_temp_to_celsius(None, Some(val as f32)) {
+                            max_temp = Some(max_temp.map_or(c, |m| m.max(c)));
+                        }
+                    }
+                }
+                max_temp
+            }
+        }
+    }
+
+    impl Drop for PdhThermalMonitor {
+        fn drop(&mut self) {
+            unsafe {
+                if !self.hquery.is_invalid() {
+                    let _ = PdhCloseQuery(self.hquery);
+                }
+            }
+        }
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -456,5 +600,20 @@ mod tests {
         let acpi = acpi_tenths_kelvin_to_celsius(3331.5).unwrap();
         assert!((acpi - 60.0).abs() < 0.05);
         assert!(acpi_tenths_kelvin_to_celsius(2700.0).is_none());
+    }
+
+    #[test]
+    fn apply_lhm_sensor_reading_accepts_cpu_die_and_ignores_distance_to_tjmax() {
+        let mut out = WmiSensorSample::default();
+        let mut prio = u8::MAX;
+
+        apply_lhm_sensor_reading("/intelcpu/0/temperature/4", "CPU Core #1 Distance to TjMax", "Temperature", 32.0, &mut prio, &mut out);
+        assert_eq!(out.cpu_temp_c, None);
+
+        apply_lhm_sensor_reading("/intelcpu/0/temperature/0", "Core #0", "Temperature", 58.0, &mut prio, &mut out);
+        assert_eq!(out.cpu_temp_c, Some(58.0));
+
+        apply_lhm_sensor_reading("/lpc/nct6798d/temperature/0", "CPU Die (average)", "Temperature", 64.0, &mut prio, &mut out);
+        assert_eq!(out.cpu_temp_c, Some(64.0));
     }
 }

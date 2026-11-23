@@ -92,6 +92,50 @@ fn validate_hwinfo_header(hdr: &HwInfoHeader) -> Option<(usize, usize, usize, us
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn classify_hwinfo_cpu_temp_priority(label: &str) -> Option<u8> {
+    if label.contains("gpu")
+        || label.contains("motherboard")
+        || label.contains("chipset")
+        || label.contains("pch")
+        || label.contains("vrm")
+        || label.contains("mos")
+        || label.contains("dimm")
+        || label.contains("drive")
+        || label.contains("nvme")
+        || label.contains("ssd")
+        || label.contains("hdd")
+        || label.contains("ambient")
+        || label.contains("coolant")
+        || label.contains("water")
+        || label.contains("distance to tjmax")
+    {
+        return None;
+    }
+
+    if label.contains("tctl/tdie") || label.contains("cpu package") || label.contains("cpu die") {
+        Some(0)
+    } else if label.contains("tdie")
+        || label.contains("ccd1")
+        || label.contains("ccd2")
+        || label.contains("cpu (")
+        || label.contains("cpu ia cores")
+    {
+        Some(1)
+    } else if label.contains("core max")
+        || label.contains("core average")
+        || label == "cpu"
+        || label.starts_with("cpu ")
+        || label.starts_with("package")
+    {
+        Some(2)
+    } else if label.contains("core #") || label.starts_with("core ") {
+        Some(3)
+    } else {
+        None
+    }
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn parse_hwinfo_readings_slice(bytes: &[u8], offset: usize, elem_size: usize, count: usize) -> Option<ShmSensorSample> {
     let required = offset.checked_add(count.checked_mul(elem_size)?)?;
     if bytes.len() < required {
@@ -107,27 +151,31 @@ fn parse_hwinfo_readings_slice(bytes: &[u8], offset: usize, elem_size: usize, co
             let ptr = base.add(offset + i * elem_size) as *const HwInfoReading;
             std::ptr::read_unaligned(ptr)
         };
-        let label = c_bytes_to_lowercase(&reading.sz_label_orig);
-        let val = reading.value as f32;
+        let orig_label = c_bytes_to_lowercase(&reading.sz_label_orig);
+        let label = if orig_label.is_empty() {
+            c_bytes_to_lowercase(&reading.sz_label_user)
+        } else {
+            orig_label
+        };
+        let unit = c_bytes_to_lowercase(&reading.sz_unit);
+        let mut val = reading.value as f32;
 
         if !val.is_finite() {
             continue;
         }
 
-        if reading.t_reading == HWINFO_READING_TYPE_TEMP && val > 0.0 && val < 130.0 {
-            if label.contains("tctl/tdie") || label.contains("cpu package") {
-                if best_cpu_prio > 0 {
-                    best_cpu_prio = 0;
+        if reading.t_reading == HWINFO_READING_TYPE_TEMP {
+            if unit.contains('f') {
+                val = (val - 32.0) / 1.8;
+            }
+            if val <= 0.0 || val >= 130.0 {
+                continue;
+            }
+            if let Some(prio) = classify_hwinfo_cpu_temp_priority(&label) {
+                if prio < best_cpu_prio {
+                    best_cpu_prio = prio;
                     out.cpu_temp_c = Some(val);
                 }
-            } else if label.contains("tdie") || label.contains("ccd1") || label.contains("cpu (") {
-                if best_cpu_prio > 1 {
-                    best_cpu_prio = 1;
-                    out.cpu_temp_c = Some(val);
-                }
-            } else if label.contains("core max") && best_cpu_prio > 2 {
-                best_cpu_prio = 2;
-                out.cpu_temp_c = Some(val);
             } else if (label.contains("gpu temperature") || label.contains("gpu edge"))
                 && out.gpu_temp_c.is_none()
             {
@@ -474,5 +522,43 @@ mod tests {
         ct.f_temp[1] = 140.0; // 60 C
         let temp = parse_coretemp_shm_bytes(as_bytes(&ct)).unwrap();
         assert!((temp - 60.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_hwinfo_shm_handles_broad_cpu_labels_fahrenheit_and_ignores_deltas() {
+        let mut r_delta = make_reading(HWINFO_READING_TYPE_TEMP, "Core Distance to TjMAX", 35.0);
+        r_delta.sz_unit[0] = b'C';
+
+        let mut r_user = make_reading(HWINFO_READING_TYPE_TEMP, "", 59.0);
+        r_user.sz_label_user[..6].copy_from_slice(b"Core 0");
+
+        let mut r_die_f = make_reading(HWINFO_READING_TYPE_TEMP, "CPU Die (average)", 149.0); // 65 C
+        let unit_f = "°F".as_bytes();
+        r_die_f.sz_unit[..unit_f.len()].copy_from_slice(unit_f);
+
+        let readings = [r_delta, r_user, r_die_f];
+        let offset = size_of::<HwInfoHeader>();
+        let hdr = HwInfoHeader {
+            dw_signature: HWINFO_SIGNATURE,
+            dw_version: 1,
+            dw_revision: 0,
+            poll_time: 456,
+            dw_offset_of_sensor_section: 0,
+            dw_size_of_sensor_element: 0,
+            dw_num_sensor_elements: 0,
+            dw_offset_of_reading_section: offset as u32,
+            dw_size_of_reading_element: size_of::<HwInfoReading>() as u32,
+            dw_num_reading_elements: readings.len() as u32,
+        };
+
+        let mut buf = Vec::with_capacity(offset + readings.len() * size_of::<HwInfoReading>());
+        buf.extend_from_slice(as_bytes(&hdr));
+        for r in &readings {
+            buf.extend_from_slice(as_bytes(r));
+        }
+
+        let sample = parse_hwinfo_shm_bytes(&buf).expect("valid HWiNFO buffer must parse");
+        let cpu_t = sample.cpu_temp_c.expect("CPU Die (average) in F should parse");
+        assert!((cpu_t - 65.0).abs() < 0.05);
     }
 }
