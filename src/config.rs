@@ -148,6 +148,9 @@ pub struct AppConfig {
 
     #[serde(default = "default_empty_string")]
     pub custom_net_name: String,
+
+    #[serde(default = "default_false")]
+    pub pawnio_prompt_dismissed: bool,
 }
 
 fn default_dock_edge() -> String { "Right".to_string() }
@@ -227,6 +230,7 @@ impl Default for AppConfig {
             custom_cpu_name: default_empty_string(),
             custom_gpu_name: default_empty_string(),
             custom_net_name: default_empty_string(),
+            pawnio_prompt_dismissed: default_false(),
         }
     }
 }
@@ -528,6 +532,15 @@ mod tests {
         assert_eq!(clamped.sidebar_width, 360);
         assert!(!clamped.show_clock);
         assert_eq!(clamped.polling_interval, 1000);
+        assert!(!clamped.pawnio_prompt_dismissed);
+
+        let mut dismissed_cfg = cfg;
+        dismissed_cfg.pawnio_prompt_dismissed = true;
+        dismissed_cfg.save_to(&settings_path).unwrap();
+        let raw_dismissed = fs::read_to_string(&settings_path).unwrap();
+        assert!(raw_dismissed.contains("\"PawnioPromptDismissed\": true"));
+        let (reloaded, _) = AppConfig::load_from_paths(&settings_path, None);
+        assert!(reloaded.pawnio_prompt_dismissed);
 
         let _ = fs::remove_dir_all(&dir);
     }

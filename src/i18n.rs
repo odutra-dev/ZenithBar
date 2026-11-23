@@ -139,10 +139,47 @@ pub struct I18nStrings {
     pub update_up_to_date_msg: String,
     pub update_downloading: String,
     pub update_failed: String,
+
+    // PawnIO CPU Sensor Setup
+    #[serde(default = "default_pawnio_label")]
+    pub pawnio_label: String,
+    #[serde(default = "default_pawnio_desc")]
+    pub pawnio_desc: String,
+    #[serde(default = "default_btn_setup_pawnio")]
+    pub btn_setup_pawnio: String,
+    #[serde(default = "default_pawnio_prompt_title")]
+    pub pawnio_prompt_title: String,
+    #[serde(default = "default_pawnio_prompt_msg")]
+    pub pawnio_prompt_msg: String,
+    #[serde(default = "default_pawnio_setup_ok")]
+    pub pawnio_setup_ok: String,
+    #[serde(default = "default_pawnio_setup_err")]
+    pub pawnio_setup_err: String,
 }
 
 fn default_usage_label() -> String {
     "uso".to_string()
+}
+fn default_pawnio_label() -> String {
+    "  └ CPU Temperature Driver (PawnIO)".to_string()
+}
+fn default_pawnio_desc() -> String {
+    "Downloads signed PawnIO driver + sensor service for CPU temp".to_string()
+}
+fn default_btn_setup_pawnio() -> String {
+    "Install / Repair".to_string()
+}
+fn default_pawnio_prompt_title() -> String {
+    "ZenithBar - Enable CPU Temperature".to_string()
+}
+fn default_pawnio_prompt_msg() -> String {
+    "Windows does not expose your CPU die temperature without a hardware driver.\n\nWould you like ZenithBar to automatically download and install the signed PawnIO driver and background sensor service? (Requires one Administrator confirmation).".to_string()
+}
+fn default_pawnio_setup_ok() -> String {
+    "PawnIO driver and sensor service installed successfully!".to_string()
+}
+fn default_pawnio_setup_err() -> String {
+    "Failed to configure PawnIO sensor service:".to_string()
 }
 
 impl Default for I18nStrings {
@@ -256,5 +293,19 @@ mod tests {
         assert_eq!(fallback.cpu_title, serde_json::from_str::<I18nStrings>(PT_BR_JSON).unwrap().cpu_title);
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn bundled_locales_include_non_empty_pawnio_strings() {
+        for loc in ["en-US", "pt-BR"] {
+            let s = load_locale_from_paths(loc, &[]);
+            assert!(!s.pawnio_label.is_empty(), "{loc} missing pawnio_label");
+            assert!(!s.pawnio_desc.is_empty(), "{loc} missing pawnio_desc");
+            assert!(!s.btn_setup_pawnio.is_empty(), "{loc} missing btn_setup_pawnio");
+            assert!(!s.pawnio_prompt_title.is_empty(), "{loc} missing pawnio_prompt_title");
+            assert!(!s.pawnio_prompt_msg.is_empty(), "{loc} missing pawnio_prompt_msg");
+            assert!(!s.pawnio_setup_ok.is_empty(), "{loc} missing pawnio_setup_ok");
+            assert!(!s.pawnio_setup_err.is_empty(), "{loc} missing pawnio_setup_err");
+        }
     }
 }

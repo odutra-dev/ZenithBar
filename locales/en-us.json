@@ -110,5 +110,12 @@
   "update_up_to_date_title": "ZenithBar Update",
   "update_up_to_date_msg": "You are already using the latest version of ZenithBar.",
   "update_downloading": "Downloading update and restarting ZenithBar...",
-  "update_failed": "Failed to complete update:"
+  "update_failed": "Failed to complete update:",
+  "pawnio_label": "  └ CPU Temperature Driver (PawnIO)",
+  "pawnio_desc": "Downloads signed PawnIO driver + sensor service for CPU temp",
+  "btn_setup_pawnio": "Install / Repair",
+  "pawnio_prompt_title": "ZenithBar - Enable CPU Temperature",
+  "pawnio_prompt_msg": "Windows does not expose your CPU die temperature without a hardware driver.\n\nWould you like ZenithBar to automatically download and install the signed PawnIO driver and background sensor service? (Requires one Administrator confirmation).",
+  "pawnio_setup_ok": "PawnIO driver and sensor service installed successfully!",
+  "pawnio_setup_err": "Failed to configure PawnIO sensor service:"
 }
