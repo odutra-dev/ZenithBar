@@ -315,17 +315,18 @@ impl TelemetryEngine {
             0.0
         };
 
-        // Try reading CPU temperature from components
-        let mut cpu_temp: Option<f32> = None;
-        for comp in &self.components {
-            let label = comp.label().to_lowercase();
-            if label.contains("cpu") || label.contains("core") || label.contains("package") || label.contains("tctl") {
-                if let Some(t) = comp.temperature() {
-                    cpu_temp = Some(t);
-                    break;
-                }
-            }
-        }
+        // Try reading CPU temperature from components (and Linux sysfs fallback)
+        #[allow(unused_mut)]
+        let mut cpu_candidates: Vec<(String, Option<f32>)> = self
+            .components
+            .iter()
+            .map(|c| (c.label().to_string(), c.temperature()))
+            .collect();
+        #[cfg(not(target_os = "windows"))]
+        cpu_candidates.extend(collect_linux_sysfs_cpu_temps_from(std::path::Path::new("/sys/class")));
+        let cpu_temp = select_cpu_temperature(
+            cpu_candidates.iter().map(|(l, t)| (l.as_str(), *t)),
+        );
 
         self.cpu_history.pop_front();
         self.cpu_history.push_back(total_usage);
@@ -853,6 +854,162 @@ fn select_primary_network(candidates: &[NetCandidate]) -> (String, String, u64, 
     }
 }
 
+fn classify_cpu_sensor_priority(label: &str) -> Option<u8> {
+    let l = label.trim().to_ascii_lowercase();
+    if l.is_empty() {
+        return None;
+    }
+
+    // Reject non-CPU thermal sensors that may contain "core", "package", or generic words
+    if l.contains("gpu")
+        || l.contains("graphics")
+        || l.contains("amdgpu")
+        || l.contains("radeon")
+        || l.contains("nvidia")
+        || l.contains("nouveau")
+        || l.contains("nvme")
+        || l.contains("ssd")
+        || l.contains("hdd")
+        || l.contains("drivetemp")
+        || l.contains("wifi")
+        || l.contains("iwlwifi")
+        || l.contains("wlan")
+        || l.contains("battery")
+        || l.contains("bat")
+        || l.contains("pch")
+        || l.contains("dimm")
+        || l.contains("spd")
+        || l.contains("vrm")
+        || l.contains("mos")
+        || l.contains("ambient")
+        || l.contains("coolant")
+        || l.contains("water")
+        || l.contains("composite")
+        || l == "computer"
+    {
+        return None;
+    }
+
+    if l.contains("tctl/tdie")
+        || l.contains("package id")
+        || l.contains("cpu package")
+        || l.contains("x86_pkg_temp")
+        || l.contains("tdie")
+    {
+        Some(0)
+    } else if l.contains("k10temp")
+        || l.contains("zenpower")
+        || l.contains("coretemp")
+        || l.contains("tccd")
+        || l.contains("ccd1")
+        || l.contains("ccd2")
+        || l.contains("cpu_thermal")
+        || l.contains("cpu-thermal")
+        || l.contains("soc_thermal")
+        || l.contains("soc-thermal")
+        || l.contains("cpu die")
+        || l.contains("cputin")
+    {
+        Some(1)
+    } else if l.contains("tctl")
+        || l.contains("package")
+        || l.contains("cpu")
+        || l.contains("core")
+    {
+        Some(2)
+    } else if l.contains("acpitz") {
+        Some(3)
+    } else {
+        None
+    }
+}
+
+fn select_cpu_temperature<'a, I>(readings: I) -> Option<f32>
+where
+    I: IntoIterator<Item = (&'a str, Option<f32>)>,
+{
+    let mut best: Option<(u8, f32)> = None;
+    for (label, temp_opt) in readings {
+        let Some(t) = temp_opt else { continue };
+        if !t.is_finite() || t <= 0.0 || t >= 130.0 {
+            continue;
+        }
+        let Some(prio) = classify_cpu_sensor_priority(label) else {
+            continue;
+        };
+        match best {
+            None => best = Some((prio, t)),
+            Some((best_prio, _)) if prio < best_prio => best = Some((prio, t)),
+            _ => {}
+        }
+    }
+    best.map(|(_, t)| t)
+}
+
+#[cfg(any(not(target_os = "windows"), test))]
+fn collect_linux_sysfs_cpu_temps_from(sys_class: &std::path::Path) -> Vec<(String, Option<f32>)> {
+    let mut out = Vec::new();
+
+    if let Ok(hwmon_dirs) = std::fs::read_dir(sys_class.join("hwmon")) {
+        for entry in hwmon_dirs.flatten() {
+            let dir = entry.path();
+            let chip_name = std::fs::read_to_string(dir.join("name"))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
+            if chip_name.is_empty() {
+                continue;
+            }
+            if let Ok(files) = std::fs::read_dir(&dir) {
+                for f in files.flatten() {
+                    let fname = f.file_name().to_string_lossy().to_string();
+                    if let Some(rest) = fname.strip_prefix("temp")
+                        && let Some(id) = rest.strip_suffix("_input")
+                        && let Ok(raw_mc) = std::fs::read_to_string(f.path())
+                            .unwrap_or_default()
+                            .trim()
+                            .parse::<i32>()
+                    {
+                        let temp_label = std::fs::read_to_string(dir.join(format!("temp{}_label", id)))
+                            .map(|s| s.trim().to_string())
+                            .unwrap_or_default();
+                        let full_label = if temp_label.is_empty() {
+                            format!("{} temp{}", chip_name, id)
+                        } else {
+                            format!("{} {}", chip_name, temp_label)
+                        };
+                        out.push((full_label, Some(raw_mc as f32 / 1000.0)));
+                    }
+                }
+            }
+        }
+    }
+
+    if let Ok(tz_dirs) = std::fs::read_dir(sys_class.join("thermal")) {
+        for entry in tz_dirs.flatten() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if !name.starts_with("thermal_zone") {
+                continue;
+            }
+            let dir = entry.path();
+            let tz_type = std::fs::read_to_string(dir.join("type"))
+                .map(|s| s.trim().to_string())
+                .unwrap_or_default();
+            if tz_type.is_empty() {
+                continue;
+            }
+            if let Ok(raw_mc) = std::fs::read_to_string(dir.join("temp"))
+                .unwrap_or_default()
+                .trim()
+                .parse::<i32>()
+            {
+                out.push((tz_type, Some(raw_mc as f32 / 1000.0)));
+            }
+        }
+    }
+
+    out
+}
+
 fn fetch_external_ip() -> String {
     use std::io::{Read, Write};
     use std::net::TcpStream;
@@ -1009,5 +1166,67 @@ mod tests {
         for w in snap.disks.windows(2) {
             assert!(w[0].mount.to_ascii_lowercase() <= w[1].mount.to_ascii_lowercase());
         }
+    }
+
+    #[test]
+    fn select_cpu_temperature_prioritizes_cpu_sensors_and_filters_non_cpu_or_invalid() {
+        let readings = [
+            ("GPU Core", Some(52.0)),
+            ("Computer", Some(40.0)),
+            ("acpitz temp1", Some(43.0)),
+            ("coretemp Core 0", Some(58.0)),
+            ("coretemp Package id 0", Some(63.0)),
+            ("k10temp Tdie", Some(0.0)),
+        ];
+        assert_eq!(select_cpu_temperature(readings), Some(63.0));
+
+        // Supports AMD k10temp/zenpower without Tctl keyword (e.g. Tdie, Tccd1, or raw k10temp temp1)
+        assert_eq!(
+            select_cpu_temperature([("k10temp temp1", Some(54.5))]),
+            Some(54.5)
+        );
+        assert_eq!(
+            select_cpu_temperature([("zenpower Tdie", Some(61.25))]),
+            Some(61.25)
+        );
+        assert_eq!(
+            select_cpu_temperature([("nvme Composite", Some(39.0))]),
+            None
+        );
+    }
+
+    #[test]
+    fn collect_linux_sysfs_cpu_temps_reads_hwmon_and_thermal_zones() {
+        let dir = std::env::temp_dir().join(format!("zenithbar_sysfs_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let hwmon0 = dir.join("hwmon/hwmon0");
+        let hwmon1 = dir.join("hwmon/hwmon1");
+        let tz0 = dir.join("thermal/thermal_zone0");
+        std::fs::create_dir_all(&hwmon0).unwrap();
+        std::fs::create_dir_all(&hwmon1).unwrap();
+        std::fs::create_dir_all(&tz0).unwrap();
+
+        std::fs::write(hwmon0.join("name"), "nvme\n").unwrap();
+        std::fs::write(hwmon0.join("temp1_label"), "Composite\n").unwrap();
+        std::fs::write(hwmon0.join("temp1_input"), "38000\n").unwrap();
+
+        std::fs::write(hwmon1.join("name"), "k10temp\n").unwrap();
+        std::fs::write(hwmon1.join("temp1_input"), "56250\n").unwrap();
+
+        std::fs::write(tz0.join("type"), "x86_pkg_temp\n").unwrap();
+        std::fs::write(tz0.join("temp"), "61000\n").unwrap();
+
+        let collected = collect_linux_sysfs_cpu_temps_from(&dir);
+        let selected = select_cpu_temperature(collected.iter().map(|(l, t)| (l.as_str(), *t)));
+        assert_eq!(selected, Some(61.0));
+
+        // Remove thermal zone so hwmon k10temp without label is selected
+        let _ = std::fs::remove_dir_all(&tz0);
+        let collected = collect_linux_sysfs_cpu_temps_from(&dir);
+        let selected = select_cpu_temperature(collected.iter().map(|(l, t)| (l.as_str(), *t)));
+        assert_eq!(selected, Some(56.25));
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
