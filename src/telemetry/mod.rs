@@ -81,6 +81,7 @@ pub struct TelemetryEngine {
     components: Components,
     hostname: String,
     external_ip: String,
+    ext_ip_rx: Option<std::sync::mpsc::Receiver<String>>,
     last_net_check: Instant,
     last_disk_check: Instant,
     last_ext_ip_check: Instant,
@@ -149,6 +150,7 @@ impl TelemetryEngine {
             components,
             hostname,
             external_ip: String::from("--"),
+            ext_ip_rx: None,
             last_net_check: Instant::now(),
             last_disk_check: Instant::now(),
             last_ext_ip_check: Instant::now().checked_sub(std::time::Duration::from_secs(3600)).unwrap_or_else(Instant::now),
@@ -182,6 +184,7 @@ impl TelemetryEngine {
             .unwrap_or_else(|_| Components::new().unwrap());
         self.nvidia_smi_available = None;
         self.external_ip = String::from("--");
+        self.ext_ip_rx = None;
         self.last_ext_ip_check = Instant::now()
             .checked_sub(std::time::Duration::from_secs(3600))
             .unwrap_or_else(Instant::now);
@@ -197,13 +200,31 @@ impl TelemetryEngine {
     pub fn snapshot(&mut self) -> TelemetrySnapshot {
         self.tick();
 
-        // Refresh external IP periodically every 30 minutes
-        if self.last_ext_ip_check.elapsed().as_secs() > 1800 || self.external_ip == "--" {
-            self.last_ext_ip_check = Instant::now();
-            let ext = fetch_external_ip();
-            if ext != "--" {
-                self.external_ip = ext;
+        if let Some(rx) = self.ext_ip_rx.as_ref() {
+            match rx.try_recv() {
+                Ok(ext) => {
+                    if ext != "--" {
+                        self.external_ip = ext;
+                    }
+                    self.ext_ip_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    self.ext_ip_rx = None;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
             }
+        }
+
+        // Refresh external IP asynchronously every 30 minutes (or retry every 60s when unknown)
+        let elapsed_ext = self.last_ext_ip_check.elapsed().as_secs();
+        let should_refresh_ext = elapsed_ext > 1800 || (self.external_ip == "--" && elapsed_ext > 60);
+        if should_refresh_ext && self.ext_ip_rx.is_none() {
+            self.last_ext_ip_check = Instant::now();
+            let (tx, rx) = std::sync::mpsc::channel();
+            self.ext_ip_rx = Some(rx);
+            std::thread::spawn(move || {
+                let _ = tx.send(fetch_external_ip());
+            });
         }
 
         #[allow(unused_mut)]
@@ -413,7 +434,7 @@ impl TelemetryEngine {
         #[cfg(target_os = "windows")]
         let _ = elapsed;
 
-        results.sort_by(|a, b| a.mount.to_ascii_lowercase().cmp(&b.mount.to_ascii_lowercase()));
+        results.sort_by_key(|a| a.mount.to_ascii_lowercase());
         results
     }
 
@@ -500,8 +521,8 @@ impl TelemetryEngine {
 
         // Fallback to nvidia-smi CLI if Windows NVML/ADL or Linux didn't fill full NVIDIA telemetry
         let needs_nvidia_cli = temp.is_none() || clock_ghz.is_none() || usage.is_none();
-        if needs_nvidia_cli && self.nvidia_smi_available != Some(false) {
-            if let Some(nv) = query_nvidia_smi(&mut self.nvidia_smi_available) {
+        if needs_nvidia_cli && self.nvidia_smi_available != Some(false)
+            && let Some(nv) = query_nvidia_smi(&mut self.nvidia_smi_available) {
                 if !nv.name.is_empty() && name == "GPU do Sistema" {
                     name = nv.name;
                 }
@@ -523,11 +544,10 @@ impl TelemetryEngine {
                     fan_percent = nv.fan_percent;
                 }
             }
-        }
 
         #[cfg(not(target_os = "windows"))]
-        if usage.is_none() && temp.is_none() && clock_ghz.is_none() {
-            if let Some(sysfs_gpu) = query_linux_drm_gpu() {
+        if usage.is_none() && temp.is_none() && clock_ghz.is_none()
+            && let Some(sysfs_gpu) = query_linux_drm_gpu() {
                 if usage.is_none() {
                     usage = sysfs_gpu.usage;
                 }
@@ -546,17 +566,15 @@ impl TelemetryEngine {
                     fan_percent = sysfs_gpu.fan_percent;
                 }
             }
-        }
 
         if temp.is_none() {
             for comp in &self.components {
                 let label = comp.label().to_lowercase();
-                if label.contains("gpu") || label.contains("graphics") || label.contains("amdgpu") {
-                    if let Some(t) = comp.temperature() {
+                if (label.contains("gpu") || label.contains("graphics") || label.contains("amdgpu"))
+                    && let Some(t) = comp.temperature() {
                         temp = Some(t);
                         break;
                     }
-                }
             }
         }
 
@@ -964,21 +982,21 @@ fn collect_linux_sysfs_cpu_temps_from(sys_class: &std::path::Path) -> Vec<(Strin
                     let fname = f.file_name().to_string_lossy().to_string();
                     if let Some(rest) = fname.strip_prefix("temp")
                         && let Some(id) = rest.strip_suffix("_input")
-                        && let Ok(raw_mc) = std::fs::read_to_string(f.path())
-                            .unwrap_or_default()
-                            .trim()
-                            .parse::<i32>()
-                    {
-                        let temp_label = std::fs::read_to_string(dir.join(format!("temp{}_label", id)))
-                            .map(|s| s.trim().to_string())
-                            .unwrap_or_default();
-                        let full_label = if temp_label.is_empty() {
-                            format!("{} temp{}", chip_name, id)
-                        } else {
-                            format!("{} {}", chip_name, temp_label)
-                        };
-                        out.push((full_label, Some(raw_mc as f32 / 1000.0)));
-                    }
+                            && let Ok(raw_mc) = std::fs::read_to_string(f.path())
+                                .unwrap_or_default()
+                                .trim()
+                                .parse::<i32>()
+                            {
+                                let temp_label = std::fs::read_to_string(dir.join(format!("temp{}_label", id)))
+                                    .map(|s| s.trim().to_string())
+                                    .unwrap_or_default();
+                                let full_label = if temp_label.is_empty() {
+                                    format!("{} temp{}", chip_name, id)
+                                } else {
+                                    format!("{} {}", chip_name, temp_label)
+                                };
+                                out.push((full_label, Some(raw_mc as f32 / 1000.0)));
+                            }
                 }
             }
         }
@@ -1010,27 +1028,30 @@ fn collect_linux_sysfs_cpu_temps_from(sys_class: &std::path::Path) -> Vec<(Strin
     out
 }
 
+fn parse_external_ip_body(body: &str) -> Option<String> {
+    let trimmed = body.trim();
+    if trimmed.parse::<std::net::IpAddr>().is_ok() {
+        Some(trimmed.to_string())
+    } else {
+        None
+    }
+}
+
 fn fetch_external_ip() -> String {
-    use std::io::{Read, Write};
-    use std::net::TcpStream;
     use std::time::Duration;
 
-    if let Ok(mut stream) = TcpStream::connect_timeout(
-        &"64.185.227.156:80".parse().unwrap(),
-        Duration::from_millis(1500),
-    ) {
-        let _ = stream.set_read_timeout(Some(Duration::from_millis(1500)));
-        let _ = stream.write_all(b"GET / HTTP/1.1\r\nHost: api.ipify.org\r\nUser-Agent: ZenithBar\r\nConnection: close\r\n\r\n");
-        let mut resp = String::new();
-        if stream.read_to_string(&mut resp).is_ok() {
-            if let Some(body) = resp.split("\r\n\r\n").nth(1) {
-                let ip = body.trim().to_string();
-                if !ip.is_empty() && ip.chars().all(|c| c.is_ascii_digit() || c == '.' || c == ':') {
-                    return ip;
-                }
+    let agent = ureq::AgentBuilder::new()
+        .timeout(Duration::from_secs(2))
+        .build();
+
+    if let Ok(resp) = agent
+        .get("https://api.ipify.org")
+        .set("User-Agent", "ZenithBar")
+        .call()
+        && let Ok(body) = resp.into_string()
+            && let Some(ip) = parse_external_ip_body(&body) {
+                return ip;
             }
-        }
-    }
     String::from("--")
 }
 
@@ -1228,5 +1249,19 @@ mod tests {
         assert_eq!(selected, Some(56.25));
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parse_external_ip_body_validates_ip_addresses() {
+        assert_eq!(
+            parse_external_ip_body(" 203.0.113.42 \n"),
+            Some("203.0.113.42".to_string())
+        );
+        assert_eq!(
+            parse_external_ip_body("2001:db8::1"),
+            Some("2001:db8::1".to_string())
+        );
+        assert_eq!(parse_external_ip_body("<html>error</html>"), None);
+        assert_eq!(parse_external_ip_body(""), None);
     }
 }
