@@ -290,17 +290,16 @@ impl AppConfig {
     }
 
     pub(crate) fn load_from_paths(settings_path: &Path, legacy_toml: Option<&Path>) -> (Self, bool) {
-        if let Ok(content) = fs::read_to_string(settings_path) {
-            if let Ok(mut cfg) = serde_json::from_str::<Self>(&content) {
+        if let Ok(content) = fs::read_to_string(settings_path)
+            && let Ok(mut cfg) = serde_json::from_str::<Self>(&content) {
                 cfg.sidebar_width = cfg.sidebar_width.clamp(180, 360);
                 return (cfg, false);
             }
-        }
 
         // Caso exista um config.toml legado da versão anterior, migra automaticamente
-        if let Some(toml_legacy) = legacy_toml {
-            if toml_legacy.exists() {
-                if let Ok(content) = fs::read_to_string(toml_legacy) {
+        if let Some(toml_legacy) = legacy_toml
+            && toml_legacy.exists()
+                && let Ok(content) = fs::read_to_string(toml_legacy) {
                     #[derive(Deserialize)]
                     struct LegacyConfig {
                         refresh_interval_ms: Option<u64>,
@@ -326,8 +325,6 @@ impl AppConfig {
                         return (cfg, true);
                     }
                 }
-            }
-        }
 
         (Self::default(), true)
     }
@@ -486,8 +483,10 @@ mod tests {
 
     #[test]
     fn dock_edge_helpers_toggle_and_match_case_insensitively() {
-        let mut cfg = AppConfig::default();
-        cfg.dock_edge = "right".to_string();
+        let mut cfg = AppConfig {
+            dock_edge: "right".to_string(),
+            ..Default::default()
+        };
         assert!(cfg.is_dock_right());
 
         cfg.set_dock_right(false);
@@ -504,10 +503,12 @@ mod tests {
         let dir = unique_temp_dir("roundtrip");
         let settings_path = dir.join("Settings.json");
 
-        let mut cfg = AppConfig::default();
-        cfg.culture = "pt-BR".to_string();
-        cfg.sidebar_width = 250;
-        cfg.custom_cpu_name = "Ryzen 7".to_string();
+        let cfg = AppConfig {
+            culture: "pt-BR".to_string(),
+            sidebar_width: 250,
+            custom_cpu_name: "Ryzen 7".to_string(),
+            ..Default::default()
+        };
         cfg.save_to(&settings_path).unwrap();
 
         let raw = fs::read_to_string(&settings_path).unwrap();

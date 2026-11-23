@@ -169,13 +169,11 @@ pub(crate) fn load_locale_from_paths(culture: &str, candidates: &[PathBuf]) -> I
 
     for path in candidates {
         let p: &Path = path.as_path();
-        if p.is_file() {
-            if let Ok(content) = fs::read_to_string(p) {
-                if let Ok(parsed) = serde_json::from_str::<I18nStrings>(&content) {
+        if p.is_file()
+            && let Ok(content) = fs::read_to_string(p)
+                && let Ok(parsed) = serde_json::from_str::<I18nStrings>(&content) {
                     return parsed;
                 }
-            }
-        }
     }
 
     // Fall back to built-in embedded resources
@@ -244,8 +242,10 @@ mod tests {
         let valid_path = dir.join("custom.json");
         let corrupt_path = dir.join("broken.json");
 
-        let mut custom = I18nStrings::default();
-        custom.cpu_title = "CUSTOM CPU".to_string();
+        let custom = I18nStrings {
+            cpu_title: "CUSTOM CPU".to_string(),
+            ..Default::default()
+        };
         fs::write(&valid_path, serde_json::to_string(&custom).unwrap()).unwrap();
         fs::write(&corrupt_path, "{ broken json").unwrap();
 

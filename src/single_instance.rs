@@ -160,11 +160,10 @@ mod unix {
     }
 
     fn default_lock_path() -> PathBuf {
-        if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
-            if !runtime_dir.is_empty() {
+        if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR")
+            && !runtime_dir.is_empty() {
                 return PathBuf::from(runtime_dir).join("zenithbar.lock");
             }
-        }
         std::env::temp_dir().join("zenithbar.lock")
     }
 
