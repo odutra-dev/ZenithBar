@@ -382,7 +382,11 @@ pub mod win32 {
 #[cfg(not(target_os = "windows"))]
 pub mod win32 {
     use super::TrayEvents;
+    use ksni::blocking::TrayMethods;
+    use ksni::menu::StandardItem;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::RwLock;
 
     pub static SHOULD_TOGGLE_VISIBILITY: AtomicBool = AtomicBool::new(false);
     pub static SHOULD_OPEN_SETTINGS: AtomicBool = AtomicBool::new(false);
@@ -394,19 +398,168 @@ pub mod win32 {
     pub static SHOULD_TOGGLE_APPBAR: AtomicBool = AtomicBool::new(false);
     pub static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
 
-    pub fn set_always_top_state(_always_top: bool) {}
-    pub fn set_tray_culture(_culture: &str) {}
+    static TRAY_CULTURE: RwLock<String> = RwLock::new(String::new());
 
-    pub struct TrayIcon {}
+    pub fn set_always_top_state(_always_top: bool) {}
+
+    pub fn set_tray_culture(culture: &str) {
+        if let Ok(mut lock) = TRAY_CULTURE.write() {
+            *lock = culture.to_string();
+        }
+    }
+
+    pub fn get_tray_culture() -> String {
+        TRAY_CULTURE
+            .read()
+            .map(|g| g.clone())
+            .unwrap_or_else(|_| "en-US".to_string())
+    }
+
+    fn ensure_tray_icon_theme_dir() -> String {
+        const ICON_BYTES: &[u8] = include_bytes!("../assets/icon.png");
+        let base_dir = std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share"))
+            })
+            .unwrap_or_else(|| std::env::temp_dir().join("zenithbar-share"));
+        let icon_dir = base_dir.join("icons/hicolor/512x512/apps");
+        let icon_file = icon_dir.join("zenithbar.png");
+        if !icon_file.exists() {
+            let _ = std::fs::create_dir_all(&icon_dir);
+            let _ = std::fs::write(&icon_file, ICON_BYTES);
+        }
+        base_dir.join("icons").to_string_lossy().to_string()
+    }
+
+    struct ZenithLinuxTray {
+        icon_theme_path: String,
+    }
+
+    impl ksni::Tray for ZenithLinuxTray {
+        fn id(&self) -> String {
+            "zenithbar".to_string()
+        }
+
+        fn title(&self) -> String {
+            "ZenithBar".to_string()
+        }
+
+        fn icon_name(&self) -> String {
+            "zenithbar".to_string()
+        }
+
+        fn icon_theme_path(&self) -> String {
+            self.icon_theme_path.clone()
+        }
+
+        fn activate(&mut self, _x: i32, _y: i32) {
+            SHOULD_TOGGLE_VISIBILITY.store(true, Ordering::SeqCst);
+        }
+
+        fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
+            let culture = get_tray_culture();
+            let s = crate::i18n::load_locale(if culture.is_empty() {
+                "en-US"
+            } else {
+                &culture
+            });
+
+            vec![
+                StandardItem {
+                    label: s.tray_toggle,
+                    activate: Box::new(|_| {
+                        SHOULD_TOGGLE_VISIBILITY.store(true, Ordering::SeqCst);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+                StandardItem {
+                    label: s.tray_settings,
+                    activate: Box::new(|_| {
+                        SHOULD_OPEN_SETTINGS.store(true, Ordering::SeqCst);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+                StandardItem {
+                    label: s.tray_toggle_edge,
+                    activate: Box::new(|_| {
+                        SHOULD_TOGGLE_SIDE.store(true, Ordering::SeqCst);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+                StandardItem {
+                    label: s.tray_cycle_monitor,
+                    activate: Box::new(|_| {
+                        SHOULD_CYCLE_SCREEN.store(true, Ordering::SeqCst);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+                StandardItem {
+                    label: s.tray_reload_sensors,
+                    activate: Box::new(|_| {
+                        SHOULD_RELOAD_SENSORS.store(true, Ordering::SeqCst);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+                ksni::MenuItem::Separator,
+                StandardItem {
+                    label: s.tray_github,
+                    activate: Box::new(|_| {
+                        let _ = std::process::Command::new("xdg-open")
+                            .arg("https://github.com/odutra-dev/ZenithBar")
+                            .spawn();
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+                ksni::MenuItem::Separator,
+                StandardItem {
+                    label: s.tray_exit,
+                    activate: Box::new(|_| {
+                        SHOULD_EXIT.store(true, Ordering::SeqCst);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+            ]
+        }
+    }
+
+    pub struct TrayIcon {
+        handle: Option<ksni::blocking::Handle<ZenithLinuxTray>>,
+    }
 
     impl TrayIcon {
         pub fn new(_hwnd_raw: isize) -> Self {
-            Self {}
+            Self { handle: None }
         }
 
         pub fn init(&mut self) -> bool {
-            crate::log_msg("[Linux Tray] Initialized StatusNotifierItem / Desktop Tray.");
-            true
+            if self.handle.is_some() {
+                return true;
+            }
+            let tray = ZenithLinuxTray {
+                icon_theme_path: ensure_tray_icon_theme_dir(),
+            };
+            match tray.assume_sni_available(true).spawn() {
+                Ok(handle) => {
+                    self.handle = Some(handle);
+                    crate::log_msg("[Linux Tray] StatusNotifierItem inicializado com sucesso.");
+                    true
+                }
+                Err(err) => {
+                    crate::log_msg(&format!(
+                        "[Linux Tray] Aviso: falha ao iniciar StatusNotifierItem: {:?}",
+                        err
+                    ));
+                    false
+                }
+            }
         }
 
         pub fn poll_events(&self) -> TrayEvents {
@@ -425,7 +578,16 @@ pub mod win32 {
 
         #[allow(dead_code)]
         pub fn remove(&mut self) {
-            crate::log_msg("[Linux Tray] Removed StatusNotifierItem.");
+            if let Some(handle) = self.handle.take() {
+                handle.shutdown();
+                crate::log_msg("[Linux Tray] StatusNotifierItem encerrado.");
+            }
+        }
+    }
+
+    impl Drop for TrayIcon {
+        fn drop(&mut self) {
+            self.remove();
         }
     }
 }
