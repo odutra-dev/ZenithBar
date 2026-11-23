@@ -1,7 +1,62 @@
+use crate::monitor::MonitorDevice;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DockEdge {
     Left,
     Right,
+}
+
+pub fn compute_dock_geometry(
+    edge: DockEdge,
+    logical_width: i32,
+    scale: f32,
+    monitor: &MonitorDevice,
+) -> (i32, i32, i32, i32) {
+    let s = if scale > 0.0 && scale.is_finite() { scale } else { 1.0 };
+    let physical_w = (logical_width.clamp(180, 360) as f32 * s).round() as i32;
+    let x = match edge {
+        DockEdge::Left => monitor.work_left,
+        DockEdge::Right => monitor.work_right - physical_w,
+    };
+    let y = monitor.work_top;
+    let h = monitor.work_height.max(1);
+    (x, y, physical_w, h)
+}
+
+#[cfg(any(not(target_os = "windows"), test))]
+pub fn compute_x11_strut_partial(
+    edge: DockEdge,
+    x: i32,
+    y: i32,
+    w: i32,
+    h: i32,
+    monitor: &MonitorDevice,
+    total_screen_w: i32,
+) -> Option<[u32; 12]> {
+    let mut strut = [0u32; 12];
+    let start_y = y.max(0) as u32;
+    let end_y = (y + h - 1).max(0) as u32;
+
+    match edge {
+        DockEdge::Left => {
+            if monitor.left > 0 {
+                return None;
+            }
+            strut[0] = (x.max(0) + w).max(0) as u32;
+            strut[4] = start_y;
+            strut[5] = end_y;
+        }
+        DockEdge::Right => {
+            let mon_right = monitor.left + monitor.width;
+            if total_screen_w > 0 && mon_right < total_screen_w {
+                return None;
+            }
+            strut[1] = (total_screen_w - x).max(w).max(0) as u32;
+            strut[6] = start_y;
+            strut[7] = end_y;
+        }
+    }
+    Some(strut)
 }
 
 #[cfg(target_os = "windows")]
@@ -101,6 +156,8 @@ pub mod win32 {
                 );
             }
         }
+
+        pub fn attach_window(&mut self, _window: slint::Weak<crate::AppWindow>) {}
 
         pub fn register(&mut self) -> bool {
             if self.hwnd.0.is_null() {
@@ -210,15 +267,9 @@ pub mod win32 {
 
                 let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(self.hwnd);
                 let scale = if dpi > 0 { dpi as f32 / 96.0 } else { 1.0 };
-                let physical_w = (self.width as f32 * scale).round() as i32;
-
-                let x = match self.edge {
-                    DockEdge::Left => self.monitor.work_left,
-                    DockEdge::Right => self.monitor.work_right - physical_w,
-                };
-                let y = self.monitor.work_top;
+                let (x, y, physical_w, h) =
+                    super::compute_dock_geometry(self.edge, self.width, scale, &self.monitor);
                 let w = physical_w;
-                let h = self.monitor.work_height;
 
                 let rect = RECT {
                     left: x,
@@ -300,8 +351,13 @@ pub mod win32 {
 
 #[cfg(not(target_os = "windows"))]
 pub mod win32 {
-    use super::DockEdge;
+    use super::{compute_dock_geometry, compute_x11_strut_partial, DockEdge};
     use crate::monitor::MonitorDevice;
+    use slint::winit_030::winit::dpi::{PhysicalPosition, PhysicalSize};
+    use slint::winit_030::winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use slint::winit_030::winit::window::WindowLevel;
+    use slint::winit_030::WinitWindowAccessor;
+    use slint::ComponentHandle;
 
     pub struct AppBarManager {
         edge: DockEdge,
@@ -310,6 +366,7 @@ pub mod win32 {
         always_top: bool,
         click_through: bool,
         is_registered: bool,
+        window_weak: Option<slint::Weak<crate::AppWindow>>,
     }
 
     impl AppBarManager {
@@ -329,12 +386,17 @@ pub mod win32 {
             ));
             Self {
                 edge,
-                width,
+                width: width.clamp(180, 360),
                 monitor,
                 always_top,
                 click_through,
                 is_registered: false,
+                window_weak: None,
             }
+        }
+
+        pub fn attach_window(&mut self, window: slint::Weak<crate::AppWindow>) {
+            self.window_weak = Some(window);
         }
 
         pub fn register(&mut self) -> bool {
@@ -355,17 +417,19 @@ pub mod win32 {
         }
 
         pub fn set_width(&mut self, width: i32) {
-            self.width = width;
+            self.width = width.clamp(180, 360);
             self.update_position();
         }
 
         pub fn set_always_top(&mut self, always_top: bool) {
             self.always_top = always_top;
+            self.update_position();
             crate::log_msg(&format!("[Linux Desktop] Always on top: {}", always_top));
         }
 
         pub fn set_click_through(&mut self, click_through: bool) {
             self.click_through = click_through;
+            self.update_position();
         }
 
         pub fn set_appbar_mode(&mut self, use_appbar: bool) {
@@ -376,20 +440,303 @@ pub mod win32 {
             }
         }
 
-        pub fn hide_window(&self) {}
+        pub fn hide_window(&self) {
+            if let Some(weak) = self.window_weak.as_ref()
+                && let Some(ui) = weak.upgrade()
+            {
+                if self.is_registered {
+                    apply_x11_clear_struts(&ui);
+                }
+                let _ = ui.hide();
+            }
+        }
 
-        pub fn show_window(&self) {}
+        pub fn show_window(&self) {
+            if let Some(weak) = self.window_weak.as_ref()
+                && let Some(ui) = weak.upgrade()
+            {
+                let _ = ui.show();
+                self.update_position();
+            }
+        }
 
         pub fn update_position(&self) {
+            let Some(weak) = self.window_weak.as_ref() else {
+                return;
+            };
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+
+            let win = ui.window();
+            let scale = win.scale_factor();
+            let (x, y, phys_w, phys_h) =
+                compute_dock_geometry(self.edge, self.width, scale, &self.monitor);
+
+            let logical_h = if scale > 0.0 {
+                phys_h as f32 / scale
+            } else {
+                phys_h as f32
+            };
+            ui.set_sidebar_width_px(self.width as f32);
+            ui.set_sidebar_height_px(logical_h);
+
+            win.set_position(slint::PhysicalPosition::new(x, y));
+
+            win.with_winit_window(|winit_win| {
+                winit_win.set_outer_position(PhysicalPosition::new(x, y));
+                let _ = winit_win.request_inner_size(PhysicalSize::new(
+                    phys_w.max(1) as u32,
+                    phys_h.max(1) as u32,
+                ));
+                winit_win.set_window_level(if self.always_top {
+                    WindowLevel::AlwaysOnTop
+                } else {
+                    WindowLevel::Normal
+                });
+                let _ = winit_win.set_cursor_hittest(!self.click_through);
+
+                if let Ok(handle) = winit_win.window_handle()
+                    && let Some(xwin) = extract_x11_window_id(handle.as_raw())
+                {
+                    apply_x11_dock_hints(
+                        xwin,
+                        self.edge,
+                        x,
+                        y,
+                        phys_w,
+                        phys_h,
+                        &self.monitor,
+                        self.always_top,
+                        self.is_registered,
+                    );
+                }
+            });
+
             crate::log_msg(&format!(
-                "[Linux Desktop] Edge: {:?}, Width: {}, Monitor: {}",
-                self.edge, self.width, self.monitor.name
+                "[Linux Desktop] Positioned ({}, {}), Size {}x{}, Edge: {:?}, Dock: {}, Monitor: {}",
+                x, y, phys_w, phys_h, self.edge, self.is_registered, self.monitor.name
             ));
         }
 
         pub fn unregister(&mut self) {
             self.is_registered = false;
+            if let Some(weak) = self.window_weak.as_ref()
+                && let Some(ui) = weak.upgrade()
+            {
+                apply_x11_clear_struts(&ui);
+            }
+            self.update_position();
             crate::log_msg("[Linux Desktop] Unregistered screen reservation.");
         }
+    }
+
+    impl Drop for AppBarManager {
+        fn drop(&mut self) {
+            self.unregister();
+        }
+    }
+
+    fn extract_x11_window_id(raw: RawWindowHandle) -> Option<u32> {
+        match raw {
+            RawWindowHandle::Xlib(h) => u32::try_from(h.window).ok(),
+            RawWindowHandle::Xcb(h) => Some(h.window.get()),
+            _ => None,
+        }
+    }
+
+    fn intern_atom(conn: &x11rb::rust_connection::RustConnection, name: &[u8]) -> Option<u32> {
+        use x11rb::protocol::xproto::ConnectionExt;
+        conn.intern_atom(false, name)
+            .ok()?
+            .reply()
+            .ok()
+            .map(|r| r.atom)
+            .filter(|&a| a != 0)
+    }
+
+    fn apply_x11_clear_struts(ui: &crate::AppWindow) {
+        ui.window().with_winit_window(|winit_win| {
+            if let Ok(handle) = winit_win.window_handle()
+                && let Some(xwin) = extract_x11_window_id(handle.as_raw())
+                && let Ok((conn, _)) = x11rb::connect(None)
+            {
+                use x11rb::connection::Connection;
+                use x11rb::protocol::xproto::ConnectionExt;
+                for name in [&b"_NET_WM_STRUT_PARTIAL"[..], &b"_NET_WM_STRUT"[..]] {
+                    if let Some(atom) = intern_atom(&conn, name) {
+                        let _ = conn.delete_property(xwin, atom);
+                    }
+                }
+                let _ = conn.flush();
+            }
+        });
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn apply_x11_dock_hints(
+        xwin: u32,
+        edge: DockEdge,
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        monitor: &MonitorDevice,
+        always_top: bool,
+        reserve_space: bool,
+    ) {
+        use x11rb::connection::Connection;
+        use x11rb::protocol::xproto::{AtomEnum, ConfigureWindowAux, ConnectionExt, PropMode};
+        use x11rb::wrapper::ConnectionExt as _;
+
+        let Ok((conn, screen_num)) = x11rb::connect(None) else {
+            return;
+        };
+        let total_screen_w = conn
+            .setup()
+            .roots
+            .get(screen_num)
+            .map(|s| s.width_in_pixels as i32)
+            .unwrap_or(monitor.left + monitor.width);
+
+        // Window Type: Dock when reserving space, Utility otherwise (keeps frameless panel clean)
+        if let Some(wm_type) = intern_atom(&conn, b"_NET_WM_WINDOW_TYPE") {
+            let target_type = if reserve_space {
+                intern_atom(&conn, b"_NET_WM_WINDOW_TYPE_DOCK")
+            } else {
+                intern_atom(&conn, b"_NET_WM_WINDOW_TYPE_UTILITY")
+            };
+            if let Some(atom_val) = target_type {
+                let _ = conn.change_property32(
+                    PropMode::REPLACE,
+                    xwin,
+                    wm_type,
+                    AtomEnum::ATOM,
+                    &[atom_val],
+                );
+            }
+        }
+
+        // Window State: Skip Taskbar/Pager, Sticky, and Above when always_top
+        if let Some(wm_state) = intern_atom(&conn, b"_NET_WM_STATE") {
+            let mut states = Vec::new();
+            if let Some(a) = intern_atom(&conn, b"_NET_WM_STATE_SKIP_TASKBAR") {
+                states.push(a);
+            }
+            if let Some(a) = intern_atom(&conn, b"_NET_WM_STATE_SKIP_PAGER") {
+                states.push(a);
+            }
+            if let Some(a) = intern_atom(&conn, b"_NET_WM_STATE_STICKY") {
+                states.push(a);
+            }
+            if always_top
+                && let Some(a) = intern_atom(&conn, b"_NET_WM_STATE_ABOVE")
+            {
+                states.push(a);
+            }
+            if !states.is_empty() {
+                let _ = conn.change_property32(
+                    PropMode::REPLACE,
+                    xwin,
+                    wm_state,
+                    AtomEnum::ATOM,
+                    &states,
+                );
+            }
+        }
+
+        // Struts (reserve desktop edge on X11)
+        let strut_partial_atom = intern_atom(&conn, b"_NET_WM_STRUT_PARTIAL");
+        let strut_atom = intern_atom(&conn, b"_NET_WM_STRUT");
+        if reserve_space {
+            if let Some(strut) =
+                compute_x11_strut_partial(edge, x, y, w, h, monitor, total_screen_w)
+            {
+                if let Some(atom) = strut_partial_atom {
+                    let _ = conn.change_property32(
+                        PropMode::REPLACE,
+                        xwin,
+                        atom,
+                        AtomEnum::CARDINAL,
+                        &strut,
+                    );
+                }
+                if let Some(atom) = strut_atom {
+                    let _ = conn.change_property32(
+                        PropMode::REPLACE,
+                        xwin,
+                        atom,
+                        AtomEnum::CARDINAL,
+                        &strut[..4],
+                    );
+                }
+            }
+        } else {
+            if let Some(atom) = strut_partial_atom {
+                let _ = conn.delete_property(xwin, atom);
+            }
+            if let Some(atom) = strut_atom {
+                let _ = conn.delete_property(xwin, atom);
+            }
+        }
+
+        let aux = ConfigureWindowAux::new()
+            .x(x)
+            .y(y)
+            .width(w.max(1) as u32)
+            .height(h.max(1) as u32);
+        let _ = conn.configure_window(xwin, &aux);
+        let _ = conn.flush();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::monitor::MonitorDevice;
+
+    fn sample_monitor(left: i32, width: i32, work_top: i32, work_height: i32) -> MonitorDevice {
+        MonitorDevice {
+            index: 0,
+            name: "Test".to_string(),
+            is_primary: true,
+            left,
+            top: 0,
+            width,
+            height: work_top + work_height,
+            work_left: left,
+            work_top,
+            work_right: left + width,
+            work_bottom: work_top + work_height,
+            work_width: width,
+            work_height,
+        }
+    }
+
+    #[test]
+    fn compute_dock_geometry_anchors_to_right_and_left_with_dpi_scaling() {
+        let mon = sample_monitor(0, 2560, 32, 1360);
+
+        let (rx, ry, rw, rh) = compute_dock_geometry(DockEdge::Right, 300, 1.0, &mon);
+        assert_eq!((rx, ry, rw, rh), (2260, 32, 300, 1360));
+
+        let (lx, ly, lw, lh) = compute_dock_geometry(DockEdge::Left, 300, 1.5, &mon);
+        assert_eq!((lx, ly, lw, lh), (0, 32, 450, 1360));
+    }
+
+    #[test]
+    fn compute_x11_strut_partial_reserves_outer_edges_and_skips_interior_monitors() {
+        let primary = sample_monitor(0, 2560, 32, 1360);
+        let strut_right =
+            compute_x11_strut_partial(DockEdge::Right, 2260, 32, 300, 1360, &primary, 2560)
+                .expect("right edge on outer screen boundary should emit strut");
+        assert_eq!(strut_right[1], 300);
+        assert_eq!(strut_right[6], 32);
+        assert_eq!(strut_right[7], 1391);
+
+        // Dual monitor setup (2560 + 1920 = 4480): right edge of left monitor is interior -> None
+        let interior =
+            compute_x11_strut_partial(DockEdge::Right, 2260, 32, 300, 1360, &primary, 4480);
+        assert!(interior.is_none());
     }
 }
